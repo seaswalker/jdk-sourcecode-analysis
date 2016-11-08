@@ -477,3 +477,43 @@ unparkSuccessor:
 }
 ```
 
+可以看出，显示检查下一个节点(next)，如果没有被取消，那么唤醒它即可，如果已经被取消，那么将倒着从后面查找。
+
+## 公平锁
+
+原理和非公平锁大同小异，在这里只说下是如何体现其公平性的。
+
+FairSync.lock:
+
+```java
+final void lock() {
+	acquire(1);
+}
+```
+
+最终执行的是FairSync.tryAcquire:
+
+```java
+protected final boolean tryAcquire(int acquires) {
+	final Thread current = Thread.currentThread();
+	int c = getState();
+	if (c == 0) {
+      	//这里
+		if (!hasQueuedPredecessors() &&
+			compareAndSetState(0, acquires)) {
+			setExclusiveOwnerThread(current);
+			return true;
+		}
+	}
+	else if (current == getExclusiveOwnerThread()) {
+		int nextc = c + acquires;
+		if (nextc < 0)
+			throw new Error("Maximum lock count exceeded");
+		setState(nextc);
+		return true;
+	}
+	return false;
+}
+```
+
+关键便是!hasQueuedPredecessors这个条件，这就保证了**队列前面的节点一定会先获得锁**。
