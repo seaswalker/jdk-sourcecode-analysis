@@ -119,3 +119,124 @@ static int sharedCount(int c)    { return c >>> SHARED_SHIFT; }
 static int exclusiveCount(int c) { return c & EXCLUSIVE_MASK; }
 ```
 
+这就说明，**读锁会被写锁阻塞**。
+
+### 应该阻塞?
+
+对应于readerShouldBlock方法，对于公平锁和非公平锁有两种不同的语义。
+
+#### 非公平锁
+
+NonfairSync.readerShouldBlock:
+
+```java
+final boolean readerShouldBlock() {
+	return apparentlyFirstQueuedIsExclusive();
+}
+```
+
+AbstractQueuedSynchronizer.apparentlyFirstQueuedIsExclusive:
+
+```java
+final boolean apparentlyFirstQueuedIsExclusive() {
+	Node h, s;
+	return (h = head) != null && (s = h.next)  != null &&
+		!s.isShared() && s.thread != null;
+}
+```
+
+可以看出，此方法在非公平锁的情况下主要是**检测当前锁队列中第一个元素是不是写锁(排它锁)，如果是，那么当前线程主动放弃竞争锁的机会，这样做是为了防止出现写锁饥饿的现象**。
+
+#### 公平锁
+
+FairSync.readerShouldBlock:
+
+```java
+final boolean readerShouldBlock() {
+	return hasQueuedPredecessors();
+}
+```
+
+AbstractQueuedSynchronizer.hasQueuedPredecessors:
+
+```java
+public final boolean hasQueuedPredecessors() {
+	Node t = tail; // Read fields in reverse initialization order
+	Node h = head;
+	Node s;
+	return h != t &&
+		((s = h.next) == null || s.thread != Thread.currentThread());
+}
+```
+
+这个就很好理解了，锁队列中前面如果还有其它等待锁的线程，那么就应该阻塞。
+
+### 快速尝试
+
+如果满足所有的条件(没有写锁、不应该阻塞，没有达到读锁可重入次数的上限)，那么便会进行一次快速尝试，如果失败，再进行入队(锁队列)的复杂操作。
+
+快速尝试其实就是一个CAS操作，源码见上面，再次不再 赘述。
+
+### 完全尝试
+
+所谓的完全尝试便是在死循环里执行快速尝试，直到成功为止。
+
+### 入队等待
+
+上面提到的快速尝试和完全尝试都是在当前没有其它线程持有写锁的情况下，如果写锁被其它线程持有，那么只能将当前线程加入到锁队列排队。
+
+## unlock
+
+ReadLock.unlock:
+
+```java
+public void unlock() {
+	sync.releaseShared(1);
+}
+```
+
+AbstractQueuedSynchronizer.releaseShared:
+
+```java
+public final boolean releaseShared(int arg) {
+	if (tryReleaseShared(arg)) {
+		doReleaseShared();
+		return true;
+	}
+	return false;
+}
+```
+
+Sync.tryReleaseShared:
+
+```java
+protected final boolean tryReleaseShared(int unused) {
+	Thread current = Thread.currentThread();
+	if (firstReader == current) {
+		// assert firstReaderHoldCount > 0;
+		if (firstReaderHoldCount == 1)
+			firstReader = null;
+		else
+			firstReaderHoldCount--;
+	} else {
+		HoldCounter rh = cachedHoldCounter;
+		if (rh == null || rh.tid != getThreadId(current))
+			rh = readHolds.get();
+		int count = rh.count;
+		if (count <= 1) {
+			readHolds.remove();
+			if (count <= 0)
+				throw unmatchedUnlockException();
+		}
+		--rh.count;
+	}
+	for (;;) {
+		int c = getState();
+		int nextc = c - SHARED_UNIT;
+		if (compareAndSetState(c, nextc))
+			return nextc == 0;
+	}
+}
+```
+
+ReadWriteLock采用了ThreadLocal来记录线程重入读锁的次数，这么做的原因是
