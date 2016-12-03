@@ -239,4 +239,62 @@ protected final boolean tryReleaseShared(int unused) {
 }
 ```
 
-ReadWriteLock采用了ThreadLocal来记录线程重入读锁的次数，这么做的原因是
+ReadWriteLock采用了ThreadLocal来记录线程重入读锁的次数，这么做的原因是允许多个线程同时拥有读锁。
+
+# 写锁
+
+## lock
+
+源码:
+
+```java
+public void lock() {
+	sync.acquire(1);
+}
+```
+
+AbstractQueuedSynchronizer.acquire:
+
+```java
+public final void acquire(int arg) {
+	if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+		selfInterrupt();
+}
+```
+
+此方法在说明ReentrantLock的时候已经见过了。
+
+Sync.tryAcquire:
+
+```java
+protected final boolean tryAcquire(int acquires) {
+	Thread current = Thread.currentThread();
+	int c = getState();
+	int w = exclusiveCount(c);
+	if (c != 0) {
+		// (Note: if c != 0 and w == 0 then shared count != 0)
+		if (w == 0 || current != getExclusiveOwnerThread())
+			return false;
+		if (w + exclusiveCount(acquires) > MAX_COUNT)
+			throw new Error("Maximum lock count exceeded");
+		// Reentrant acquire
+		setState(c + acquires);
+		return true;
+	}
+	if (writerShouldBlock() ||
+		!compareAndSetState(c, c + acquires))
+		return false;
+	setExclusiveOwnerThread(current);
+	return true;
+}
+```
+
+很明显，申请写锁的套路是这样的: **如果有其它线程持有读锁或写锁，那么失败，否则尝试进行写锁获取**。
+
+writerShouldBlock方法对应读锁里的readerShouldBlock方法，后者可以参见前面读锁-应该阻塞?一节。而对于writerShouldBlock来说同样分为两种情况，即公平锁与非公平锁。公平锁的实现目的与readerShouldBlock相同，即判断等待队列中是否有先到的等待者。
+
+而readerShouldBlock的非公平锁实现的目的在于防止写锁出现饥饿的情况，对于writerShouldBlock来说就不需要作此考量，所以NonfairSync.writerShouldBlock直接返回false。
+
+## unlock
+
+写锁的释放无非是一个减少重入次数、更改锁拥有线程以及通知后继的过程，不再赘述。
