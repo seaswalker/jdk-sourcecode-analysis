@@ -2,7 +2,7 @@
 
 ## 类图
 
-CountDownLatch本身没有任何父类或是实现任何借口，只含有一个内部类Sync.
+CountDownLatch本身没有任何父类或是实现任何接口，只含有一个内部类Sync.
 
 ![CountDownLatch](images/CountDownLatch.jpg)
 
