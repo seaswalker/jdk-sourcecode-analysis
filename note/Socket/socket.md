@@ -374,7 +374,148 @@ backlog指socket里的最大排队客户端连接数，默认为50，参考:
 
  [java socket参数详解:BackLog](http://blog.csdn.net/huang_xw/article/details/7338487)
 
+### bind
 
+真正的实现在DualStackPlainSocketImpl.socketBind，简略版源码:
+
+```java
+ void socketBind(InetAddress address, int port) {
+	int nativefd = checkAndReturnNativeFD();
+	bind0(nativefd, address, port, exclusiveBind);
+	if (port == 0) {
+		localport = localPort0(nativefd);
+	} else {
+		localport = port;
+	}
+	this.address = address;
+}
+```
+
+bind0和localPort0，native实现。
+
+### listen
+
+实现位于DualStackPlainSocketImpl.socketListen:
+
+```java
+void socketListen(int backlog) {
+	int nativefd = checkAndReturnNativeFD();
+	listen0(nativefd, backlog);
+}
+```
+
+native实现。从这里可以看出，**Java层面上的bind其实是系统级上的bind和listen两个操作**。
+
+## accept
+
+核心实现位于DualStackPlainSocketImpl.socketAccept，源码:
+
+```java
+void socketAccept(SocketImpl s) throws IOException {
+	int nativefd = checkAndReturnNativeFD();
+	int newfd = -1;
+	InetSocketAddress[] isaa = new InetSocketAddress[1];
+	if (timeout <= 0) {
+		newfd = accept0(nativefd, isaa);
+	} else {
+		configureBlocking(nativefd, false);
+		try {
+			waitForNewConnection(nativefd, timeout);
+			newfd = accept0(nativefd, isaa);
+			if (newfd != -1) {
+				configureBlocking(newfd, true);
+			}
+		} finally {
+			configureBlocking(nativefd, true);
+		}
+	}
+	/* Update (SocketImpl)s' fd */
+	fdAccess.set(s.fd, newfd);
+	/* Update socketImpls remote port, address and localport */
+	InetSocketAddress isa = isaa[0];
+	s.port = isa.getPort();
+	s.address = isa.getAddress();
+	s.localport = localport;
+}
+```
+
+可以看出，代表客户端连接的Socket对象其实是先创建的，accept其实是一个调用native实现然后再更新Socket文件描述符的过程。
+
+accept0对应Windows(Linux其实也是一样的)的accept函数，accept默认工作在阻塞模式，configureBlocking对应Windows的ioctlsocket函数，waitForNewConnection对应Windows的select函数，ioctlsocket用以改变Socket的阻塞模式。这样Java accept的超时机制实现也就好理解了。
+
+# 总结
+
+Java的Socket实现其实是对系统API的一层封装，得到的IO流其实是在Socket的read、write之上抽象出来的对象。
+
+# 参数整理
+
+记录一下SocketOptions里定义的各选项的意义。
+
+## TCP_NODELAY
+
+如果设为true，等于关闭了纳格算法，也就避免了write + write + read时的40ms延时，参考:
+
+[java socket参数详解:TcpNoDelay](http://blog.csdn.net/huang_xw/article/details/7340241)
+
+[再说TCP神奇的40ms](https://www.qcloud.com/community/article/186)
+
+## SO_BINDADDR
+
+此选项不可更改，用以获取服务器绑定的端口。
+
+## SO_REUSEADDR
+
+> 如果端口忙，但TCP状态位于 TIME_WAIT ，可以重用 端口。如果端口忙，而TCP状态位于其他状态，重用端口时依旧得到一个错误信息， 抛出“Address already in use： JVM_Bind”。如果你的服务程序停止后想立即重启，不等60秒，而新套接字依旧 使用同一端口，此时 SO_REUSEADDR 选项非常有用。必须意识到，此时任何非期 望数据到达，都可能导致服务程序反应混乱，不过这只是一种可能，事实上很不可能。
+
+摘自: [几个重要的TCP/IP选项解析(Java Socket)](http://www.open-open.com/lib/view/open1412994697952.html)
+
+但是根据Java相应注释，此参数只对MulticastSockets有效，且默认设置。
+
+## SO_BROADCAST
+
+允许连接发送广播消息，前提是所在的主机和网络支持广播消息。在Java里对DatagramSockets有效，且默认设置。
+
+## SO_LINGER
+
+> 这个Socket选项可以影响close方法的行为。在默认情况下，当调用close方法后，将立即返回；如果这时仍然有未被送出的数据包，那么这 些数据包将被丢弃。如果将linger参数设为一个正整数n时（n的值最大是65535），在调用close方法后，将最多被阻塞n秒。在这n秒内，系 统将尽量将未送出的数据包发送出去；如果超过了n秒，如果还有未发送的数据包，这些数据包将全部被丢弃；而close方法会立即返回。如果将linger 设为0，和关闭SO_LINGER选项的作用是一样的。
+
+单词linger的意思是: 徘徊，磨蹭。
+
+## SO_TIMEOUT
+
+> 这个Socket选项在前面已经讨论过。可以通过这个选项来设置读取数据超时。当输入流的read方法被阻塞时，如果设置 timeout（timeout的单位是毫秒），那么系统在等待了timeout毫秒后会抛出一个InterruptedIOException例外。在 抛出例外后，输入流并未关闭，你可以继续通过read方法读取数据。
+>
+> 如果将timeout设为0，就意味着read将会无限等待下去，直到服务端程序关闭这个Socket.这也是timeout的默认值。
+
+## SO_SNDBUF
+
+发送缓冲区的大小，注意这里不同于BufferedOutputStream，前者是对底层操作系统的一个提示，而后者是在Java层面进行提示。
+
+## SO_RCVBUF
+
+见楼上。
+
+## SO_KEEPALIVE
+
+> 如果将这个Socket选项打开，客户端Socket每隔段的时间（大约两个小时）就会利用空闲的连接向服务器发送一个数据包。这个数据包并没有其 它的作用，只是为了检测一下服务器是否仍处于活动状态。如果服务器未响应这个数据包，在大约11分钟后，客户端Socket再发送一个数据包，如果在12 分钟内，服务器还没响应，那么客户端Socket将关闭。如果将Socket选项关闭，客户端Socket在服务器无效的情况下可能会长时间不会关闭。
+>
+> SO_KEEPALIVE选项在默认情况下是关闭的。
+
+## SO_OOBINLINE
+
+默认关闭，这会导致urgent data被丢弃。参见Socket的sendUrgentData方法。
+
+我们来看一下这东西是怎么实现的，DualStackPlainSocketImpl.c JNICALL Java_java_net_DualStackPlainSocketImpl_sendOOB方法核心代码:
+
+```c++
+//取低8位
+unsigned char d = (unsigned char) data & 0xff;
+n = send(fd, (char *)&data, 1, MSG_OOB);
+```
+
+Windows API send方法前三个参数分别为: 文件描述符，消息指针，消息长度(字节)，关键就在最后一个参数，OOB是Out-of-Band的缩写，为TCP的带外消息。在TCP传输中带内与带外相当于两个独立的逻辑传输通道，但因为RFC规范冲突此种消息不被建议使用，而是应当自己在应用层面上进行实现。参考:
+
+[Java Out Of Band (called “urgent data”) data](http://stackoverflow.com/questions/15249635/java-out-of-band-called-urgent-data-data)
 
 
 
