@@ -13,8 +13,8 @@ JDK源码阅读笔记
 
 [ReentrantLock](https://github.com/seaswalker/JDK/blob/master/note/ReentrantLock/ReentrantLock.md)
 
-[Socket](https://github.com/seaswalker/JDK/blob/master/note/ReentrantLock/Socket.md)
+[Socket](https://github.com/seaswalker/JDK/blob/master/note/Socket/socket.md)
 
-[UDP](https://github.com/seaswalker/JDK/blob/master/note/ReentrantLock/udp.md)
+[UDP](https://github.com/seaswalker/JDK/blob/master/note/UDP/udp.md)
 
 
