@@ -219,6 +219,10 @@ static int removeFileOrDirectory(const jchar *path) {
 }
 ```
 
+## 移动/重命名
+
+由Windows函数_wrename实现。
+
 # FileOutputStream
 
 类图:
@@ -318,6 +322,8 @@ public static FileChannel open(FileDescriptor fd, String path, boolean readable,
 ```
 
 可以看出，getChannel的原理就是构造了一个FileChannelImpl对象，此对象中保存有对应的流的是否可读、追加、文件描述符等属性。
+
+从这里也可以看出，从输出流获取的通道由于**readable被设为false，所以这个通道也就变成了不可读的**。
 
 ### 写
 
@@ -617,7 +623,165 @@ sendfile64便是linux的底层实现了。
 
 如果map也不支持，transferToArbitraryChannel所做的便是最low的方式: 先把数据从一个通道拷贝出来，再写到另一个通道，说的就是你，Windows。
 
+### 内存映射
 
+方法声明:
+
+```java
+public abstract MappedByteBuffer map(MapMode mode, long position, long size);
+```
+
+能够将一个文件映射到内存中，从而加快数据的读取速度，注意，如果只需要对一个文件进行少数据量(KB级)的读写，那么直接读写的性能其实更好，内存映射只有在数据量大、多次读写的情况下才能表现出来。MapMode共有三种取值:
+
+- READ_ONLY，只读
+- READ_WRITE，读写，任何写操作的结果都会被同步到磁盘
+- PRIVATE，可读写，类似于copy on write，一个线程进行写操作会导致创建一个副本，而其它线程看不到当前线程的修改
+
+Java中共有三个类可以获取到FileChannel，分别是FileOutputStream, FileInputStream和RandomAccessFile，考虑到它们分别是可写的，可读的和可读写的，所以每各类获得的通道分别可以使用哪些MapMode有一定的限制，总结如下:
+
+| 类名      | FileOutputStream | FileInputStream | RandomAccessFile |
+| ------- | ---------------- | --------------- | ---------------- |
+| MapMode | 无                | READ_ONLY       | 全部               |
+
+map的Java实现位于FileChannelImpl中，下面分部分进行说明.
+
+#### 规则检查
+
+此部分对应上表的map规则，相应源码:
+
+```java
+if ((mode != MapMode.READ_ONLY) && !writable)
+    throw new NonWritableChannelException();
+if (!readable)
+    throw new NonReadableChannelException();
+```
+
+#### 大小检查
+
+```java
+long filesize;
+do {
+    filesize = nd.size(fd);
+} while ((filesize == IOStatus.INTERRUPTED) && isOpen());
+if (!isOpen())
+    return null;
+//如果需要的大小大于实际的文件大小，那么对文件进行虚扩大
+if (filesize < position + size) { // Extend file size
+    if (!writable) {
+        throw new IOException("Channel not open for writing " +
+            "- cannot extend file to required size");
+    }
+    int rv;
+    do {
+        rv = nd.truncate(fd, position + size);
+    } while ((rv == IOStatus.INTERRUPTED) && isOpen());
+    if (!isOpen())
+        return null;
+}
+//需要的大小为0，返回一个逗你玩的buffer
+if (size == 0) {
+    addr = 0;
+    // a valid file descriptor is not required
+    FileDescriptor dummy = new FileDescriptor();
+    if ((!writable) || (imode == MAP_RO))
+        return Util.newMappedByteBufferR(0, 0, dummy, null);
+    else
+        return Util.newMappedByteBuffer(0, 0, dummy, null);
+}
+```
+
+#### 映射
+
+```java
+int pagePosition = (int)(position % allocationGranularity);
+long mapPosition = position - pagePosition;
+long mapSize = size + pagePosition;
+addr = map0(imode, mapPosition, mapSize);
+FileDescriptor mfd = nd.duplicateForMapping(fd);
+int isize = (int)size;
+Unmapper um = new Unmapper(addr, mapSize, isize, mfd);
+if ((!writable) || (imode == MAP_RO)) {
+    return Util.newMappedByteBufferR(isize,
+                                     addr + pagePosition,
+                                     mfd,
+                                     um);
+} else {
+    return Util.newMappedByteBuffer(isize,
+                                    addr + pagePosition,
+                                    mfd,
+                                    um);
+}
+```
+
+map0的linux实现由系统调用mmap完成，返回映射文件的内存地址。duplicateForMapping用于复制句柄，在Windows上需要这么做，但在linux上不需要。
+
+Util.newMappedByteBuffer(R)方法实际上是构造了一个direct buffer，buffer的起始地址便是mmap返回的内存地址。
+
+### 文件锁
+
+我们以方法:
+
+```java
+public abstract FileLock lock(long position, long size, boolean shared);
+```
+
+为例，参数position和size的作用是**lock方法允许我们针对文件的某一部分进行锁定**，shared参数用以控制获取的是**共享锁还是排它锁**，默认锁定(即无参数lock方法)全部文件、排它锁。
+
+**文件锁是针对进程(即一个JVM虚拟机)而言的，**所以如果当前JVM已拥有文件的锁，而此JVM的另一个线程又尝试获取锁(同一个文件，有重复的区域)，那么会抛出OverlappingFileLockException(共享锁、排它锁都会抛出)，这是符合逻辑的，因为同一个JVM内的多个线程之间安全性**应该由程序自己维护，而不是文件锁**。
+
+以上提到的特性很容易利用以下代码进行验证，假设有线程如下:
+
+```java
+private static class GETLock implements Runnable {
+    private final FileChannel channel;
+    private final int start;
+    private final int end;
+    private GETLock(FileChannel channel, int start, int end) {
+        this.channel = channel;
+        this.start = start;
+        this.end = end;
+    }
+    @Override
+    public void run() {
+        FileLock lock = channel.lock(start, end, true);
+        System.out.println(Thread.currentThread().getName() + "获得锁");
+        Thread.sleep(2000);
+        lock.release();
+    }
+}
+```
+
+验证代码:
+
+```java
+File file = new File("test");
+FileChannel channel = new RandomAccessFile(file, "rw").getChannel();
+new Thread(new GETLock(channel, 0, 2)).start();
+new Thread(new GETLock(channel, 1, 3)).start();
+```
+
+只要文件区域出现重复，便会抛出异常。
+
+FileLock位于nio包，类图:
+
+![FileLock类图](images/FileLock.jpg)
+
+Java层面的实现位于FileChannelImpl.lock，下面对其进行分部分说明。
+
+#### 逻辑验证
+
+```java
+if (shared && !readable)
+    throw new NonReadableChannelException();
+if (!shared && !writable)
+    throw new NonWritableChannelException();
+```
+
+很容易理解，共享锁即读锁，如果获取到的通道不能读那么共享锁也就没有意义了 ，每种通道分别可以获得何种锁整理如下表:
+
+| 类名    | FileInputStream | FileOutputStream | RandomAccessFile |
+| ----- | --------------- | ---------------- | ---------------- |
+| 可获得的锁 | 共享锁             | 排它锁              | 全部               |
 
 
 
