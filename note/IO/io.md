@@ -1,5 +1,3 @@
-接下来扒一扒java的IO包。
-
 # File
 
 类图:
@@ -223,6 +221,10 @@ static int removeFileOrDirectory(const jchar *path) {
 
 由Windows函数_wrename实现。
 
+## length
+
+用以获取文件的大小，Linux实现由stat函数完成。
+
 # FileOutputStream
 
 类图:
@@ -288,500 +290,258 @@ static jint writeInternal(FD fd, const void *buf, jint len, jboolean append) {
 
 ## 通道获取
 
-这里其实是nio包的内容了。getChannel:
+隔壁 FileChannel。
+
+# RandomAccessFile
+
+老规矩，类图:
+
+![RandomAccessFile类图](images/RandomAccessFile.jpg)
+
+可见，这货与File, 输入输出流半毛钱的关系都没有。
+
+## 模式
+
+支持的读写模式整理如下表:
+
+| Mode | 意义                       |
+| ---- | ------------------------ |
+| r    | 只读                       |
+| rw   | 读写                       |
+| rws  | 任何对文件内容或元信息的写会被立即同步刷新至磁盘 |
+| rwd  | 对文件内容的写会被立即同步刷新至磁盘       |
+
+可以看出，rws和rwd两个模式的作用和FileChannel的force方法是一样的。
+
+## 构造器
+
+简略版源码:
 
 ```java
-public FileChannel getChannel() {
-    synchronized (this) {
-        if (channel == null) {
-            channel = FileChannelImpl.open(fd, path, false, true, append, this);
-        }
-        return channel;
-    }
+public RandomAccessFile(File file, String mode) {
+    String name = (file != null ? file.getPath() : null);
+    int imode = -1;
+    fd = new FileDescriptor();
+    fd.attach(this);
+    path = name;
+    open(name, imode);
 }
 ```
 
-FileChannel类图:
-
-![FileChannel类图](images/FileChannel.jpg)
-
-有几点值得注意:
-
-- InputStream和OutputStream不是线程安全的，而通道(Channel)是线程安全的。
-- Channel根据注释的解释，是一组IO操作的联结。
-- GatheringByteChannel，顾名思义就是将一组ByteBuffer的数据收集/组合起来，所以它继承自WritableByteChannel。
-- ScatteringByteChannel，即将一个通道的数据分散到多个ByteBuffer之中。
-
-其实FileChannelImpl便是FileChannel的子类，位于包sun.nio.ch中，其源码可以从openjdk的jdk\src\share\classes\sun\nio\ch目录找到，open方法源码:
-
-```java
-public static FileChannel open(FileDescriptor fd, String path, boolean readable, boolean writable,
-    boolean append, Object parent) {
-    return new FileChannelImpl(fd, path, readable, writable, append, parent);
-}
-```
-
-可以看出，getChannel的原理就是构造了一个FileChannelImpl对象，此对象中保存有对应的流的是否可读、追加、文件描述符等属性。
-
-从这里也可以看出，从输出流获取的通道由于**readable被设为false，所以这个通道也就变成了不可读的**。
-
-### 写
-
-FileChannelImpl.write简略版源码:
-
-```java
-public int write(ByteBuffer src) throws IOException {
-    ensureOpen();
-    synchronized (positionLock) {
-        int n = 0;
-        int ti = -1;
-        try {
-            begin();
-            ti = threads.add();
-            if (!isOpen())
-                return 0;
-            do {
-                n = IOUtil.write(fd, src, -1, nd);
-            } while ((n == IOStatus.INTERRUPTED) && isOpen());
-            return IOStatus.normalize(n);
-        } finally {
-            threads.remove(ti);
-            end(n > 0);
-            assert IOStatus.check(n);
-        }
-    }
-}
-```
-
-实际上从这里我们可以看出通道的可中断是怎样实现的(IO流并不可以被中断)。begin方法在父类AbstractInterruptibleChannel中实现:
-
-```java
-protected final void begin() {
-    if (interruptor == null) {
-        interruptor = new Interruptible() {
-                public void interrupt(Thread target) {
-                    synchronized (closeLock) {
-                        if (!open)
-                            return;
-                        open = false;
-                        interrupted = target;
-                        try {
-                            AbstractInterruptibleChannel.this.implCloseChannel();
-                        } catch (IOException x) { }
-                    }
-                }};
-    }
-    blockedOn(interruptor);
-    Thread me = Thread.currentThread();
-    if (me.isInterrupted())
-        interruptor.interrupt(me);
-}
-```
-
-blockedOn实际上调用的是Thread的blockedOn方法:
-
-```java
-void blockedOn(Interruptible b) {
-    synchronized (blockerLock) {
-        blocker = b;
-    }
-}
-```
-
-当所在线程被中断时，blocker对象的interrupt方法将会被调用，结合上面begin方法的实现，即当发生中断时，blocker将会关闭通道，这样也就退出了阻塞。Interruptible接口定义在sun.nio.ch中，从Thread的blocker对象的注释中可以看出，此对象是专门为实现可中断的IO而设置的。
-
-IOUtil.write的调用全部发生在sun包内，我们忽略复杂的调用关系，看一下本质: FileDispatcherImpl.c的Java_sun_nio_ch_FileDispatcherImpl_write0方法实现(简略版):
+open方法调用了native方法open0，此方法的实现位于src\share\native\java\io\RandomAccessFile.c:
 
 ```c
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_write0(JNIEnv *env, jclass clazz, jobject fdo,
-    jlong address, jint len, jboolean append) {
-    result = WriteFile(h,           /* File handle to write */
-                  (LPCVOID)address, /* pointers to the buffers */
-                  len,              /* number of bytes to write */
-                  &written,         /* receives number of bytes written */
-                  lpOv);            /* overlapped struct */
-    return convertReturnVal(env, (jint)written, JNI_FALSE);
+JNIEXPORT void JNICALL
+Java_java_io_RandomAccessFile_open0(JNIEnv *env,
+                                    jobject this, jstring path, jint mode) {
+    int flags = 0;
+    if (mode & java_io_RandomAccessFile_O_RDONLY)
+        flags = O_RDONLY;
+    else if (mode & java_io_RandomAccessFile_O_RDWR) {
+        flags = O_RDWR | O_CREAT;
+        if (mode & java_io_RandomAccessFile_O_SYNC)
+            flags |= O_SYNC;
+        else if (mode & java_io_RandomAccessFile_O_DSYNC)
+            flags |= O_DSYNC;
+    }
+    fileOpen(env, this, path, raf_fd, flags);
 }
 ```
 
-所以，通过FileOutputStream还是FileChannel进行数据的写入，在系统层面都是一样的。
+结合FileOutputStream的open方法便可以发现，**两者的open操作其实使用了相同的系统级实现，只不过RandomAccessFile支持更多的参数**。
 
-但是要注意，不同于OutputStream的write方法，这里的返回值是int。也就是说，**通道的write方法并不保证一定将我们给定的数据一次性写出**，正确的写姿势应该是这样的:
+## seek
 
-```java
-while (buf.hasRemaining()) {
-    channel.write(buf);
-}
-```
+seek允许我们自己设定当前文件的指针(偏移)。注意，系统允许设置的偏移大于文件的真实长度，但这并不改变文件的大小，只有当在新的偏移写入数据之后才会改变。
 
-那么问题来了，既然通道和OutputStream是使用的同一个系统级API，那么后者是怎么实现的?
+由native方法seek0调用Windows函数SetFilePointerEx实现，与之比对，FileChannel的position方法采用的是SetFilePointer函数，两者的区别是**SetFilePointer将新的文件指针存放在两个long中，而SetFilePointerEX只需要一个long**，至于两者为什么要采用不同的实现，不得而知。
 
-玄机在于jdk\src\share\native\java\io\io_util.c的writeBytes方法其实已经帮我们实现了循环过程，关键源码:
+## skipBytes
+
+用seek方法实现。
+
+## length
+
+获取文件的大小，不同于File的length方法，此处使用seek来实现，RandomAccessFile.c相关源码(简略):
 
 ```c
-while (len > 0) {
-    fd = GET_FD(this, fid);
-    if (fd == -1) {
-        JNU_ThrowIOException(env, "Stream Closed");
-        break;
-    }
-    if (append == JNI_TRUE) {
-        n = IO_Append(fd, buf+off, len);
+JNIEXPORT jlong JNICALL
+Java_java_io_RandomAccessFile_length(JNIEnv *env, jobject this) {
+    FD fd;
+    jlong cur = jlong_zero;
+    jlong end = jlong_zero;
+    fd = GET_FD(this, raf_fd);
+    end = IO_Lseek(fd, 0L, SEEK_END);
+    return end;
+}
+```
+
+IO_Lseek对应linux上的lseek，windows上的SetFilePointer，关于为什么可以利用seek取得文件大小，参考:
+
+[Linux 通过lseek()来实现文件大小的设置](http://blog.csdn.net/xiaobai1593/article/details/7419784)
+
+## setLength
+
+此方法可以实现文件裁剪的效果，和FileChannel的truncate方法效果相同。native实现:
+
+```c
+JNIEXPORT void JNICALL
+Java_java_io_RandomAccessFile_setLength(JNIEnv *env, jobject this, jlong newLength) {
+    FD fd;
+    jlong cur;
+    fd = GET_FD(this, raf_fd);
+    if ((cur = IO_Lseek(fd, 0L, SEEK_CUR)) == -1) goto fail;
+    //here
+    if (IO_SetLength(fd, newLength) == -1) goto fail;
+    //重设指针
+    if (cur > newLength) {
+        if (IO_Lseek(fd, 0L, SEEK_END) == -1) goto fail;
     } else {
-        n = IO_Write(fd, buf+off, len);
+        if (IO_Lseek(fd, cur, SEEK_SET) == -1) goto fail;
     }
-    if (n == -1) {
-        JNU_ThrowIOExceptionWithLastError(env, "Write error");
-        break;
-    }
-    off += n;
-    len -= n;
+    return;
 }
 ```
 
-### 读
+IO_SetLength在Windows上的真正函数是SetFilePointer，这和FileChannel的truncate是一样的，在Linux上是ftruncate函数。
 
-IOUtil.read源码:
+## 读方法
 
-```java
-static int read(FileDescriptor fd, ByteBuffer dst, long position, NativeDispatcher nd) {
-    if (dst instanceof DirectBuffer)
-        return readIntoNativeBuffer(fd, dst, position, nd);
-    // Substitute a native buffer
-    ByteBuffer bb = Util.getTemporaryDirectBuffer(dst.remaining());
-    try {
-        int n = readIntoNativeBuffer(fd, bb, position, nd);
-        bb.flip();
-        if (n > 0)
-            dst.put(bb);
-        return n;
-    } finally {
-        Util.offerFirstTemporaryDirectBuffer(bb);
-    }
-}
-```
+虽然RandomAccessFile和InputStream在继承上没有关系，但很多API是一样的。
 
-从这里可以看到一个有意思的问题，如果传入的Buffer不是direct buffer，那么先将数据读取到一个direct buffer，再全部拷贝到给定的buffer中，写其实也是这样的，这么做是为了填jvm实现的坑，参考知乎R大的回答:
-
-[Java NIO中，关于DirectBuffer，HeapBuffer的疑问？](https://www.zhihu.com/question/57374068/answer/152691891)
-
-FileDispatcherImpl.c的Java_sun_nio_ch_FileDispatcherImpl_read0关键源码:
-
-```c
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_read0(JNIEnv *env, jclass clazz, jobject fdo,
-                                      jlong address, jint len) {
-    DWORD read = 0;
-    result = ReadFile(h,          /* File handle to read */
-                      (LPVOID)address,    /* address to put data */
-                      len,        /* number of bytes to read */
-                      &read,      /* number of bytes read */
-                      NULL);      /* no overlapped struct */
-    return convertReturnVal(env, (jint)read, JNI_TRUE);
-}
-```
-
-虽然没有展开FileInputStream的源码，但是可以想到和写一样，其实都是对Windows API ReadFile的调用。
-
-### position
-
-当前文件位置的读取和设置其实是通过一个方法完成的，FileChannelImpl.position0:
-
-```java
-private native long position0(FileDescriptor fd, long offset);
-```
-
-如果offset为-1，即表示读。实现位于FileChannelImpl.c中:
-
-```c
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_FileChannelImpl_position0(JNIEnv *env, jobject this,
-                                          jobject fdo, jlong offset) {
-    DWORD lowPos = 0;
-    long highPos = 0;
-    HANDLE h = (HANDLE)(handleval(env, fdo));
-    if (offset < 0) {
-        lowPos = SetFilePointer(h, 0, &highPos, FILE_CURRENT);
-    } else {
-        lowPos = (DWORD)offset;
-        highPos = (long)(offset >> 32);
-        lowPos = SetFilePointer(h, lowPos, &highPos, FILE_BEGIN);
-    }
-    return (((jlong)highPos) << 32) | lowPos;
-}
-```
-
-SetFilePointer便是Windows API。
-
-使用position时注意两点:
-
-- 如果将位置设置在文件结束符之后，然后试图从文件通道中读取数据，读方法将返回-1 —— 文件结束标志。
-- 如果将位置设置在文件结束符之后，然后向通道中写数据，文件将撑大到当前位置并写入数据。这可能导致“文件空洞”，磁盘上物理文件中写入的数据间有空隙。
-
-### 文件裁剪/truncate
+### 读取一个字节
 
 方法声明:
 
 ```java
-public abstract FileChannel truncate(long size) throws IOException;
+private native int read0();
 ```
 
-此方法的效果是size后面的部分都会被删除，同时position也会被设置到新的位置。
+注意返回值是int，即范围为0-255,。如果我们将byte值-1写入到文件，再读出来就成了255，如要转为-1强转为byte就行了。
 
-native实现位于FileDispatcherImpl.c:
+底层对应Windows的ReadFile，Linux的read函数。
 
-```c
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_truncate0(JNIEnv *env, jobject this,
-                                             jobject fdo, jlong size) {
-    lowPos = SetFilePointer(h, lowPos, &highPos, FILE_BEGIN);
-    result = SetEndOfFile(h);
-    return 0;
+### readFully
+
+```java
+public final void readFully(byte b[]) throws IOException {
+    readFully(b, 0, b.length);
 }
 ```
 
-API SetEndOfFile的意思 是将当前位置(position)设为文件的末尾，这样就可以理解了。
-
-### 强制刷新
-
-方法声明:
+顾名思义，**此方法会在所有要求的字节读完之前阻塞**，其实就是替我们做了循环判断的过程:
 
 ```java
-public abstract void force(boolean metaData) throws IOException;
-```
-
-此方法会导致被操作系统缓存在内存中的数据强制刷新到磁盘，参数metaData表示是否需要同时将元信息(比如权限信息)刷新至磁盘。
-
-底层实现其实是对Windows API FlushFileBuffers的调用。
-
-### transferTo/transferFrom
-
-这就是所谓的零拷贝技术，主要运用在从磁盘读取数据并通过网络进行发送这一场景，可将内存拷贝次数从4次(含两次内核空间和用户空间的相互拷贝)减少到2次。参考:
-
-[JAVA Zero Copy的相关知识](https://my.oschina.net/cloudcoder/blog/299944)
-
-我们以transferTo为例进行说明，FileChannelImpl.transferTo的实现很有意思:
-
-```java
-public long transferTo(long position, long count,WritableByteChannel target) {
-    // Attempt a direct transfer, if the kernel supports it
-    if ((n = transferToDirectly(position, icount, target)) >= 0)
-        return n;
-    // Attempt a mapped transfer, but only to trusted channel types
-    if ((n = transferToTrustedChannel(position, icount, target)) >= 0)
-        return n;
-    // Slow path for untrusted targets
-    return transferToArbitraryChannel(position, icount, target);
-}
-```
-
-可以看出，将首先尝试进行零拷贝，一旦出错了(即返回错误的值)就表示内核不支持。transferToDirectly的native实现位于FileChannelImpl的transferTo0函数，Windows版的实现十分简单粗暴:
-
-```c
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_FileChannelImpl_transferTo0(JNIEnv *env, jobject this,
-                                            jint srcFD,
-                                            jlong position, jlong count,
-                                            jint dstFD)
-{
-    return IOS_UNSUPPORTED;
-}
-```
-
-就是不支持。来看看隔壁Linux的实现:
-
-```c
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_FileChannelImpl_transferTo0(JNIEnv *env, jobject this,
-                                            jint srcFD,
-                                            jlong position, jlong count,
-                                            jint dstFD){
-#if defined(__linux__)
-    off64_t offset = (off64_t)position;
-    jlong n = sendfile64(dstFD, srcFD, &offset, (size_t)count);
-    if (n < 0) {
-        if (errno == EAGAIN)
-            return IOS_UNAVAILABLE;
-        if ((errno == EINVAL) && ((ssize_t)count >= 0))
-            return IOS_UNSUPPORTED_CASE;
-        if (errno == EINTR) {
-            return IOS_INTERRUPTED;
-        }
-        JNU_ThrowIOExceptionWithLastError(env, "Transfer failed");
-        return IOS_THROWN;
-    }
-    return n;
-#elif
-//忽略solaris, mac等版本
-}
-```
-
-sendfile64便是linux的底层实现了。
-
-从transferTo源码可以看出，如果内核不支持零拷贝，Java将尝试利用map实现，map是个什么东西，参加下面。
-
-如果map也不支持，transferToArbitraryChannel所做的便是最low的方式: 先把数据从一个通道拷贝出来，再写到另一个通道，说的就是你，Windows。
-
-### 内存映射
-
-方法声明:
-
-```java
-public abstract MappedByteBuffer map(MapMode mode, long position, long size);
-```
-
-能够将一个文件映射到内存中，从而加快数据的读取速度，注意，如果只需要对一个文件进行少数据量(KB级)的读写，那么直接读写的性能其实更好，内存映射只有在数据量大、多次读写的情况下才能表现出来。MapMode共有三种取值:
-
-- READ_ONLY，只读
-- READ_WRITE，读写，任何写操作的结果都会被同步到磁盘
-- PRIVATE，可读写，类似于copy on write，一个线程进行写操作会导致创建一个副本，而其它线程看不到当前线程的修改
-
-Java中共有三个类可以获取到FileChannel，分别是FileOutputStream, FileInputStream和RandomAccessFile，考虑到它们分别是可写的，可读的和可读写的，所以每各类获得的通道分别可以使用哪些MapMode有一定的限制，总结如下:
-
-| 类名      | FileOutputStream | FileInputStream | RandomAccessFile |
-| ------- | ---------------- | --------------- | ---------------- |
-| MapMode | 无                | READ_ONLY       | 全部               |
-
-map的Java实现位于FileChannelImpl中，下面分部分进行说明.
-
-#### 规则检查
-
-此部分对应上表的map规则，相应源码:
-
-```java
-if ((mode != MapMode.READ_ONLY) && !writable)
-    throw new NonWritableChannelException();
-if (!readable)
-    throw new NonReadableChannelException();
-```
-
-#### 大小检查
-
-```java
-long filesize;
-do {
-    filesize = nd.size(fd);
-} while ((filesize == IOStatus.INTERRUPTED) && isOpen());
-if (!isOpen())
-    return null;
-//如果需要的大小大于实际的文件大小，那么对文件进行虚扩大
-if (filesize < position + size) { // Extend file size
-    if (!writable) {
-        throw new IOException("Channel not open for writing " +
-            "- cannot extend file to required size");
-    }
-    int rv;
+ public final void readFully(byte b[], int off, int len) {
+    int n = 0;
     do {
-        rv = nd.truncate(fd, position + size);
-    } while ((rv == IOStatus.INTERRUPTED) && isOpen());
-    if (!isOpen())
+        int count = this.read(b, off + n, len - n);
+        if (count < 0)
+            throw new EOFException();
+        n += count;
+    } while (n < len);
+}
+```
+
+### "语法糖"读
+
+指各种readInt，readChar等方法，其实就是读指定的字节然后给你拼起来。
+
+#### 浮点数读取/写入
+
+我们以float为例:
+
+```java
+public final void writeFloat(float v) {
+    writeInt(Float.floatToIntBits(v));
+}
+public final float readFloat() throws IOException {
+    return Float.intBitsToFloat(readInt());
+}
+```
+
+从根本上来说，写入/读取到的只不过是一组二进制数字，关键在于我们如何解读它，所以写入/读取浮点数的关键在于如何进行浮点数和int值得转换(两者的二进制形式是一样的)，上面的两个native Float方法巧妙地利用了C语言的共用体实现这一转换:
+
+```c
+JNIEXPORT jint JNICALL
+Java_java_lang_Float_floatToRawIntBits(JNIEnv *env, jclass unused, jfloat v) {
+    union {
+        int i;
+        float f;
+    } u;
+    u.f = (float)v;
+    return (jint)u.i;
+}
+```
+
+### readLine
+
+源码:
+
+```java
+public final String readLine() throws IOException {
+    StringBuffer input = new StringBuffer();
+    int c = -1;
+    boolean eol = false;
+    while (!eol) {
+        switch (c = read()) {
+        case -1:
+        case '\n':
+            eol = true;
+            break;
+        case '\r':
+            eol = true;
+            long cur = getFilePointer();
+            if ((read()) != '\n') {
+                seek(cur);
+            }
+            break;
+        default:
+            input.append((char)c);
+            break;
+        }
+    }
+    if ((c == -1) && (input.length() == 0)) {
         return null;
-}
-//需要的大小为0，返回一个逗你玩的buffer
-if (size == 0) {
-    addr = 0;
-    // a valid file descriptor is not required
-    FileDescriptor dummy = new FileDescriptor();
-    if ((!writable) || (imode == MAP_RO))
-        return Util.newMappedByteBufferR(0, 0, dummy, null);
-    else
-        return Util.newMappedByteBuffer(0, 0, dummy, null);
-}
-```
-
-#### 映射
-
-```java
-int pagePosition = (int)(position % allocationGranularity);
-long mapPosition = position - pagePosition;
-long mapSize = size + pagePosition;
-addr = map0(imode, mapPosition, mapSize);
-FileDescriptor mfd = nd.duplicateForMapping(fd);
-int isize = (int)size;
-Unmapper um = new Unmapper(addr, mapSize, isize, mfd);
-if ((!writable) || (imode == MAP_RO)) {
-    return Util.newMappedByteBufferR(isize,
-                                     addr + pagePosition,
-                                     mfd,
-                                     um);
-} else {
-    return Util.newMappedByteBuffer(isize,
-                                    addr + pagePosition,
-                                    mfd,
-                                    um);
-}
-```
-
-map0的linux实现由系统调用mmap完成，返回映射文件的内存地址。duplicateForMapping用于复制句柄，在Windows上需要这么做，但在linux上不需要。
-
-Util.newMappedByteBuffer(R)方法实际上是构造了一个direct buffer，buffer的起始地址便是mmap返回的内存地址。
-
-### 文件锁
-
-我们以方法:
-
-```java
-public abstract FileLock lock(long position, long size, boolean shared);
-```
-
-为例，参数position和size的作用是**lock方法允许我们针对文件的某一部分进行锁定**，shared参数用以控制获取的是**共享锁还是排它锁**，默认锁定(即无参数lock方法)全部文件、排它锁。
-
-**文件锁是针对进程(即一个JVM虚拟机)而言的，**所以如果当前JVM已拥有文件的锁，而此JVM的另一个线程又尝试获取锁(同一个文件，有重复的区域)，那么会抛出OverlappingFileLockException(共享锁、排它锁都会抛出)，这是符合逻辑的，因为同一个JVM内的多个线程之间安全性**应该由程序自己维护，而不是文件锁**。
-
-以上提到的特性很容易利用以下代码进行验证，假设有线程如下:
-
-```java
-private static class GETLock implements Runnable {
-    private final FileChannel channel;
-    private final int start;
-    private final int end;
-    private GETLock(FileChannel channel, int start, int end) {
-        this.channel = channel;
-        this.start = start;
-        this.end = end;
     }
-    @Override
-    public void run() {
-        FileLock lock = channel.lock(start, end, true);
-        System.out.println(Thread.currentThread().getName() + "获得锁");
-        Thread.sleep(2000);
-        lock.release();
-    }
+    return input.toString();
 }
 ```
 
-验证代码:
+可以看出，方法将byte转为了char，但是这样有一个问题，char是由byte转换而来，所以这里只支持ASCII字符，如果真的想要读一行不应使用此方法，而应该使用字符流。
+
+### readUnsignedByte
+
+不是很理解这个方法的用意，源码:
 
 ```java
-File file = new File("test");
-FileChannel channel = new RandomAccessFile(file, "rw").getChannel();
-new Thread(new GETLock(channel, 0, 2)).start();
-new Thread(new GETLock(channel, 1, 3)).start();
+public final int readUnsignedByte() throws IOException {
+    int ch = this.read();
+    if (ch < 0)
+        throw new EOFException();
+    return ch;
+}
 ```
 
-只要文件区域出现重复，便会抛出异常。
+奇怪的地方在于这里还是只读了一个字节，之后转为int，ch怎么可能是负值?这样的话和read方法又有什么区别?
 
-FileLock位于nio包，类图:
+### readUTF
 
-![FileLock类图](images/FileLock.jpg)
+应和writeUTF配合食用。writeUTF用于写入一个UTF-8编码的字符串，注意**前两个字节代表后面有多少个字节(字符串)**。所以一个10字节的字符串需要12字节存储。
 
-Java层面的实现位于FileChannelImpl.lock，下面对其进行分部分说明。
+感觉此方法应该是用在字符串、int等多种类型混合存储的场景下。
 
-#### 逻辑验证
+# 过滤流
 
-```java
-if (shared && !readable)
-    throw new NonReadableChannelException();
-if (!shared && !writable)
-    throw new NonWritableChannelException();
-```
+或者说是包装流，类图(只列出常用的):
 
-很容易理解，共享锁即读锁，如果获取到的通道不能读那么共享锁也就没有意义了 ，每种通道分别可以获得何种锁整理如下表:
+![FilterInputStream类图](images/FilterInputStream.jpg)
 
-| 类名    | FileInputStream | FileOutputStream | RandomAccessFile |
-| ----- | --------------- | ---------------- | ---------------- |
-| 可获得的锁 | 共享锁             | 排它锁              | 全部               |
+DataInputStream与RandomAccessFile的API基本一致(实现了同一个接口)，InflaterInputStream用于zip压缩包的读取。
 
+# 字符流
 
+"字符"是一个文化上的概念，字符流基于字节流，只不过是按照特定的编码规则进行解码罢了。我们以Reader为例，看一下其类图即可:
+
+![Reader类图](images/Reader.jpg)
 
