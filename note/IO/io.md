@@ -292,6 +292,33 @@ static jint writeInternal(FD fd, const void *buf, jint len, jboolean append) {
 
 隔壁 FileChannel。
 
+## 关闭
+
+FileOutputStream.close:
+
+```java
+public void close() throws IOException {
+  	//设置状态
+	synchronized (closeLock) {
+		if (closed) {
+			return;
+		}
+		closed = true;
+	}
+  	//关闭通道
+	if (channel != null) {
+		channel.close();
+	}
+	fd.closeAll(new Closeable() {
+		public void close() throws IOException {
+		   close0();
+	   }
+	});
+}
+```
+
+close0为native实现，关闭其对应的文件句柄。
+
 # RandomAccessFile
 
 老规矩，类图:

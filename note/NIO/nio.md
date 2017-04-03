@@ -228,6 +228,26 @@ SelectionKey的类图如下:
 
 从类图中可以看出，只有SocketChannel才具有读写功能，ServerSocketChannel并不具备，这和Socket和ServerSocket的关系是一样的。
 
+源码实现与FileChannle大体类似，但是有两点值得注意:
+
+- 线程安全性，读的核心代码全部位于以下线程同步块中:
+
+  ```java
+  synchronized (readLock) {
+  	//code...
+  }
+  ```
+
+  而写代码为writeLock，这也就验证了Channel线程安全的定义，同时说明**SocketChannel支持写和读之间的并行，但不能写与写、读与读之间并行**，这一特性其实是与TCP/IP协议相关的，所以，很容易可以推测FileChannel仅支持单线程读写，FileChannelImpl.read部分源码:
+
+  ```java
+  synchronized(positionLock) {//code...}
+  ```
+
+- FileChannel-关闭一节也提到了，其实**在非阻塞(NIO)模型下，仍会出现读写操作被阻塞的情况**，那非阻塞IO到底指的是什么呢?
+
+  ​
+
 http://www.cnblogs.com/xiehongfeng100/p/4619451.html
 
 http://www.cnblogs.com/promise6522/archive/2012/03/03/2377935.html

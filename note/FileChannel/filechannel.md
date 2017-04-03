@@ -629,9 +629,61 @@ native方法Java_sun_nio_ch_FileDispatcherImpl_lock0完成，linux实现由函�
 
 用以获取文件的大小，Linux实现和FileKey的init方法一样，由fstat完成，注意File的length方法的Linux实现由stat完成。而stat和fstat的主要区别是后者的第一个参数为文件描述符(只有打开了文件才会有)，而前者的第一个参数是绝对的路径，不要求打开文件，这就和Java里两者的区别很好的印证。
 
+# 关闭
 
+FileChannel继承自AbstractInterruptibleChannel，通道关闭有此类实现，包括Socket通道也是如此:
 
+```java
+public final void close() {
+	synchronized (closeLock) {
+		if (!open)
+			return;
+		open = false;
+		implCloseChannel();
+	}
+}
+```
 
+implCloseChannel方法由FileChannelImpl实现:
 
+```java
+protected void implCloseChannel() throws IOException {
+	nd.preClose(fd);
+	threads.signal();              
+	if (fileLockTable != null) {
+		fileLockTable.removeAll( new FileLockTable.Releaser() { 
+			public void release(FileLock fl) throws IOException {
+				((FileLockImpl)fl).invalidate();
+				release0(fd, fl.position(), fl.size());
+			}
+		});
+	}
+	if (parent != null) {
+		if (parent instanceof FileInputStream)
+			((FileInputStream)parent).close();
+		else if (parent instanceof FileOutputStream)
+			((FileOutputStream)parent).close();
+		else if (parent instanceof RandomAccessFile)
+			((RandomAccessFile)parent).close();
+	} else {
+		nd.close(fd);
+	}
+}
+```
 
+分为如下几步:
+
+- 预关闭, 即preClose方法，这样做的原因是Linux会对文件描述符进行回收。
+
+- 线程唤醒, 在Linux上如果有线程阻塞在一个文件描述符上，那么即使此文件描述符(FD)被关闭，被阻塞的线程也不会被唤醒，
+
+  ```java
+  threads.signal();
+  ```
+
+  正是用于将这些线程手动唤醒，threads是一个NativeThreadSet类型，在任何IO操作(比如write方法)前被加入，这一点可以在第一节"写"中得到验证。
+
+- 清除文件锁表
+
+- 调用依赖的资源的close方法。
 
