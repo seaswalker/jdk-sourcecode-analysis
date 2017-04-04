@@ -635,12 +635,12 @@ FileChannel继承自AbstractInterruptibleChannel，通道关闭有此类实现�
 
 ```java
 public final void close() {
-	synchronized (closeLock) {
-		if (!open)
-			return;
-		open = false;
-		implCloseChannel();
-	}
+    synchronized (closeLock) {
+        if (!open)
+            return;
+        open = false;
+        implCloseChannel();
+    }
 }
 ```
 
@@ -648,26 +648,26 @@ implCloseChannel方法由FileChannelImpl实现:
 
 ```java
 protected void implCloseChannel() throws IOException {
-	nd.preClose(fd);
-	threads.signal();              
-	if (fileLockTable != null) {
-		fileLockTable.removeAll( new FileLockTable.Releaser() { 
-			public void release(FileLock fl) throws IOException {
-				((FileLockImpl)fl).invalidate();
-				release0(fd, fl.position(), fl.size());
-			}
-		});
-	}
-	if (parent != null) {
-		if (parent instanceof FileInputStream)
-			((FileInputStream)parent).close();
-		else if (parent instanceof FileOutputStream)
-			((FileOutputStream)parent).close();
-		else if (parent instanceof RandomAccessFile)
-			((RandomAccessFile)parent).close();
-	} else {
-		nd.close(fd);
-	}
+    nd.preClose(fd);
+    threads.signal();
+    if (fileLockTable != null) {
+        fileLockTable.removeAll( new FileLockTable.Releaser() {
+            public void release(FileLock fl) throws IOException {
+                ((FileLockImpl)fl).invalidate();
+                release0(fd, fl.position(), fl.size());
+            }
+        });
+    }
+    if (parent != null) {
+        if (parent instanceof FileInputStream)
+            ((FileInputStream)parent).close();
+        else if (parent instanceof FileOutputStream)
+            ((FileOutputStream)parent).close();
+        else if (parent instanceof RandomAccessFile)
+            ((RandomAccessFile)parent).close();
+    } else {
+        nd.close(fd);
+    }
 }
 ```
 

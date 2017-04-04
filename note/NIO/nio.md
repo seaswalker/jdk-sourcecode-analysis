@@ -1,4 +1,32 @@
-服务器代码以nio包下的Server为例。
+# SelectionKey
+
+SelectionKey的类图如下:
+
+![SelectionKey类图](images/SelectionKey.jpg)
+
+注意，SelectionKey使用AtomicReferenceFieldUpdater进行原子更新attachment。
+
+## 兴趣设置
+
+SelectionKeyImpl.interestOps:
+
+```java
+public SelectionKey interestOps(int ops) {
+    return nioInterestOps(ops);
+}
+```
+
+nioInterestOps利用Channel来实现:
+
+```java
+public SelectionKey nioInterestOps(int ops) {
+    channel.translateAndSetInterestOps(ops, this);
+    interestOps = ops;
+    return this;
+}
+```
+
+//TODO
 
 # Selector
 
@@ -77,6 +105,24 @@ public AbstractSelector openSelector() throws IOException {
     return new EPollSelectorImpl(this);
 }
 ```
+
+## 通道注册
+
+register方法在AbstractSelector中定义，SelectorImpl中实现:
+
+```java
+protected final SelectionKey register(AbstractSelectableChannel ch,int ops,Object attachment) {
+    SelectionKeyImpl k = new SelectionKeyImpl((SelChImpl)ch, this);
+    k.attach(attachment);
+    synchronized (publicKeys) {
+        implRegister(k);
+    }
+    k.interestOps(ops);
+    return k;
+}
+```
+
+publicKeys为一个Set，
 
 ## select
 
@@ -218,12 +264,6 @@ public final SelectionKey register(Selector sel, int ops,Object att) {
 
 方法将首先检查当前通道是否已经向给定的Selector注册过了 ，AbstractSelectableChannel内部维护有一个SelectionKey数组，findKey方法便是遍历此数组逐一比较其Selector的过程。
 
-SelectionKey的类图如下:
-
-![SelectionKey类图](images/SelectionKey.jpg)
-
-注意，SelectionKey使用AtomicReferenceFieldUpdater进行原子更新attachment。
-
 ## 读
 
 从类图中可以看出，只有SocketChannel才具有读写功能，ServerSocketChannel并不具备，这和Socket和ServerSocket的关系是一样的。
@@ -234,7 +274,7 @@ SelectionKey的类图如下:
 
   ```java
   synchronized (readLock) {
-  	//code...
+    //code...
   }
   ```
 
@@ -244,11 +284,75 @@ SelectionKey的类图如下:
   synchronized(positionLock) {//code...}
   ```
 
-- FileChannel-关闭一节也提到了，其实**在非阻塞(NIO)模型下，仍会出现读写操作被阻塞的情况**，那非阻塞IO到底指的是什么呢?
+- 源码使用了字段readerThread来唤醒被阻塞的线程，在非阻塞模型下当然不会阻塞，被阻塞出现在configureBlocking(true)的情况。
 
-  ​
 
-http://www.cnblogs.com/xiehongfeng100/p/4619451.html
+Linux上的Java实现实际上是对系统调用read/write的封装，Java层面表现出来的特性其实是系统调用的反应。以写为例，在什么情况下会发生阻塞呢?对于TCP/IP协议栈，操作系统会为每个Socket维护一个发送缓冲区和一个接收缓冲区，所有待发送的数据应首先被放置到发送缓冲区中，但内核并不保证缓冲区中的数据一定会被发送出去，发送缓冲区的情况决定了写操作是否会被阻塞。
+
+那么这个缓冲区一般有多大呢?在Linux上可以通过以下两个命令进行查看:
+
+![wmem_default](images/wmem_default.png)
+
+最大大小:
+
+![wmem_max](images/wmem_max.png)
+
+一般取值就在默认和最大之间，在我的ArchLinux虚拟机上两者是一样的，即160KB。
+
+写操作在阻塞和非阻塞下的不同表现可总结如下:
+
+- 如果发送缓冲区满，那么阻塞写将会阻塞，而非阻塞写返回0.
+- 如果发送缓冲区不满，那么阻塞写会阻塞直到**发送缓冲区能够放下所有的待写数据**，而非阻塞写将返回**能够放下的字节数**。
+
+对于阻塞写，还有一个非常有意思的细节，如果我们在写时如果连接已经断开，那么
+
+而读操作**只要接收缓冲区中有数据就会返回，而不会等到接收缓冲区满**，不同表现总结如下:
+
+- 如果读缓冲为空，那么阻塞读将会阻塞，非阻塞读会返回0.
+
+读的特性可利用以下代码结合Linux nc命令很容易证明:
+
+```java
+@Test
+public void nioRead() {
+    SocketChannel channel = SocketChannel.open();
+    channel.configureBlocking(false);
+     //Linux nc监听地址
+    channel.connect(new InetSocketAddress("192.168.80.128", 10010));
+    while (channel.isConnectionPending()) {
+        channel.finishConnect();
+    }
+    ByteBuffer buffer = ByteBuffer.allocate(10);
+    int readed = channel.read(buffer);
+    System.out.println(readed);
+}
+```
+
+这里有一个以前没注意过的细节，对于非阻塞IO其connect方法也是非阻塞，也就是说，很有可能当我们调用read方法时连接还没有完成，所以我们需要循环调用isConnectionPending直到完成。
+
+参考: [Unix/Linux中的read和write函数](http://www.cnblogs.com/xiehongfeng100/p/4619451.html)
+
+## accept
+
+ServerSocketChannelImpl.accept简略版源码:
+
+```java
+public SocketChannel accept() {
+    synchronized (lock) {
+        FileDescriptor newfd = new FileDescriptor();
+        InetSocketAddress[] isaa = new InetSocketAddress[1];
+        accept0(this.fd, newfd, isaa);
+        IOUtil.configureBlocking(newfd, true);
+        InetSocketAddress isa = isaa[0];
+        sc = new SocketChannelImpl(provider(), newfd, isa);
+        return sc;
+    }
+}
+```
+
+accept0为native方法，可以看出，其负责设置了新的文件描述符，创建ScoketChannel对象，注意，默认为阻塞模式。底层实现仍为accept函数，和ServerSocket一样。
+
+
 
 http://www.cnblogs.com/promise6522/archive/2012/03/03/2377935.html
 
