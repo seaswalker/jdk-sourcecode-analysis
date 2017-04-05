@@ -648,23 +648,20 @@ implCloseChannel方法由FileChannelImpl实现:
 
 ```java
 protected void implCloseChannel() throws IOException {
-    nd.preClose(fd);
-    threads.signal();
+    // Release and invalidate any locks that we still hold
     if (fileLockTable != null) {
-        fileLockTable.removeAll( new FileLockTable.Releaser() {
-            public void release(FileLock fl) throws IOException {
-                ((FileLockImpl)fl).invalidate();
-                release0(fd, fl.position(), fl.size());
+        for (FileLock fl: fileLockTable.removeAll()) {
+            synchronized (fl) {
+                if (fl.isValid()) {
+                    nd.release(fd, fl.position(), fl.size());
+                    ((FileLockImpl)fl).invalidate();
+                }
             }
-        });
+        }
     }
+    threads.signalAndWait();
     if (parent != null) {
-        if (parent instanceof FileInputStream)
-            ((FileInputStream)parent).close();
-        else if (parent instanceof FileOutputStream)
-            ((FileOutputStream)parent).close();
-        else if (parent instanceof RandomAccessFile)
-            ((RandomAccessFile)parent).close();
+        ((java.io.Closeable)parent).close();
     } else {
         nd.close(fd);
     }
@@ -673,12 +670,10 @@ protected void implCloseChannel() throws IOException {
 
 分为如下几步:
 
-- 预关闭, 即preClose方法，这样做的原因是Linux会对文件描述符进行回收。
-
 - 线程唤醒, 在Linux上如果有线程阻塞在一个文件描述符上，那么即使此文件描述符(FD)被关闭，被阻塞的线程也不会被唤醒，
 
   ```java
-  threads.signal();
+  threads.signalAndWait();
   ```
 
   正是用于将这些线程手动唤醒，threads是一个NativeThreadSet类型，在任何IO操作(比如write方法)前被加入，这一点可以在第一节"写"中得到验证。
@@ -687,3 +682,65 @@ protected void implCloseChannel() throws IOException {
 
 - 调用依赖的资源的close方法。
 
+
+关于唤醒线程安全这一点，其实有一个隐含的线程安全的问题，结合read方法源码:
+
+```java
+public int read(ByteBuffer dst) throws IOException {
+    ensureOpen();
+    if (!readable)
+        throw new NonReadableChannelException();
+    synchronized (positionLock) {
+        int n = 0;
+        int ti = -1;
+        try {
+            begin();
+            ti = threads.add();
+            if (!isOpen())
+                return 0;
+            //here!
+            do {
+                n = IOUtil.read(fd, dst, -1, nd);
+            } while ((n == IOStatus.INTERRUPTED) && isOpen());
+            return IOStatus.normalize(n);
+        } finally {
+            threads.remove(ti);
+            end(n > 0);
+            assert IOStatus.check(n);
+        }
+    }
+}
+```
+
+如果进行通道关闭的线程唤醒被阻塞的线程、关闭文件描述符这一过程在读线程的最后一次isOpen检查和read调用之间完成(即上面源码中here处)完成，由于内核会对文件描述符进行回收(重用)，这样完全会导致**read操作读取的是一个全新的文件描述符!**
+
+JDK解决的办法在于NativeThreadSet.signalAndWait中(简略版):
+
+```java
+void signalAndWait() {
+    synchronized (this) {
+        while (used > 0) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+    }
+}
+```
+
+used表示正在进行读写的线程数，可以看出，**只要尚有线程正在进行读写操作，关闭线程就会阻塞**。那什么时候被唤醒呢?remove方法源码:
+
+```java
+void remove(int i) {
+    synchronized (this) {
+        elts[i] = 0;
+        used--;
+        if (used == 0 && waitingToEmpty)
+            notifyAll();
+    }
+}
+```
+
+这就保证了**当进行实际的文件描述符关闭时，一定没有正在读写的线程**，这就杜绝了上述情况的发生。
