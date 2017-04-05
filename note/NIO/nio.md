@@ -661,13 +661,16 @@ public void kill() throws IOException {
 }
 ```
 
+我们可以用如下方式对文件描述符进行验证，假设有命令`nc -l -p 10010`对10010端口进行监听，我们使用简单的Java连接此端口，使用ps命令得到此nc的进程号，在/proc/进程号/fd便是此进程拥有的文件描述符，如下图(ls -lh):
 
+![文件描述符](images/fd.png)
 
-http://www.cnblogs.com/promise6522/archive/2012/03/03/2377935.html
+0,1,2是Unix中标准的文件描述符号，其意义如下:
 
-http://www.cnblogs.com/Solstice/archive/2011/05/04/2036983.html
+| 文件描述符 | 用途   | POSIX名称       | stdio流 |
+| ----- | ---- | ------------- | ------ |
+| 0     | 标准输入 | STDIN_FILENO  | stdin  |
+| 1     | 标准输出 | STDOUT_FILENO | stdout |
+| 2     | 标准错误 | STDERR_FILENO | stderr |
 
-http://blog.csdn.net/Solstice/article/category/642322
-
-
-
+参考: [每天进步一点点——Linux中的文件描述符与打开文件之间的关系](http://blog.csdn.net/cywosp/article/details/38965239)

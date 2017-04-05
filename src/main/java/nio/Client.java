@@ -21,7 +21,7 @@ public class Client {
     @Test
     public void nioRead() throws IOException {
         SocketChannel channel = SocketChannel.open();
-        channel.configureBlocking(false);
+        channel.configureBlocking(true);
         channel.connect(new InetSocketAddress("192.168.80.128", 10010));
         while (channel.isConnectionPending()) {
             channel.finishConnect();
