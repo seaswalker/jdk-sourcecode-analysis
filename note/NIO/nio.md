@@ -67,6 +67,52 @@ private void setUpdateEvents(int fd, byte events, boolean force) {
 }
 ```
 
+可以看出，兴趣(epoll事件)的保存有两种方式:
+
+- 如果文件描述符小于MAX_UPDATE_ARRAY_SIZE，那么保存在byte数组。
+- 如果文件描述符大于MAX_UPDATE_ARRAY_SIZE，那么保存在Map<Integer,Byte>中。
+
+官方的解释是性能原因。那么问题来了，MAX_UPDATE_ARRAY_SIZE是什么?
+
+```java
+private static final int MAX_UPDATE_ARRAY_SIZE = AccessController.doPrivileged(
+        new GetIntegerAction("sun.nio.ch.maxUpdateArraySize", Math.min(OPEN_MAX, 64*1024)));
+```
+
+属性值默认肯定是没有设置的，OPEN_MAX的取值:
+
+```java
+private static final int OPEN_MAX = IOUtil.fdLimit();
+```
+
+fdLimit为native方法:
+
+```c
+JNIEXPORT jint JNICALL Java_sun_nio_ch_IOUtil_fdLimit(JNIEnv *env, jclass this) {
+    struct rlimit rlp;
+    if (getrlimit(RLIMIT_NOFILE, &rlp) < 0) {
+        JNU_ThrowIOExceptionWithLastError(env, "getrlimit failed");
+        return -1;
+    }
+    //如果为负值或大于Java int最大值，那么取int最大值
+    if (rlp.rlim_max < 0 || rlp.rlim_max > java_lang_Integer_MAX_VALUE) {
+        return java_lang_Integer_MAX_VALUE;
+    } else {
+        return (jint)rlp.rlim_max;
+    }
+}
+```
+
+getrlimit为Linux系统调用，用于获得系统对于资源的限制，第一个参数用以指定需要获取哪个资源，RLIMIT_NOFILE即文件描述符。
+
+返回结果中的rlim_max表示硬限制(hard limit)。参考Linux man page:
+
+[Linux Programmer's Manual GETRLIMIT(2)](http://man7.org/linux/man-pages/man2/setrlimit.2.html)
+
+可以得出结论:
+
+这里的兴趣设置只是暂时保存在Java中，而没有真正的设置到epoll中，相当于一个缓存，那么在什么时候设置到epoll中呢?参见Selector-select-poll一节。
+
 ## 取消
 
 cancel方法用于通道到Selector的注册，AbstractSelectionKey.cancel:
@@ -246,6 +292,7 @@ setUpdateEvents方法参见SelectionKey-兴趣设置，叫占位的原因就是�
 
 ```java
 public int select(long timeout) {
+    //epoll_wait的timeout参数为-1表示阻塞，0表示立即返回
     return lockAndDoSelect((timeout == 0) ? -1 : timeout);
 }
 ```
@@ -289,6 +336,15 @@ protected int doSelect(long timeout) {
     return numKeysUpdated;
 }
 ```
+
+Linux epoll实现总共只有三个函数:
+
+- int epoll_create(int size)，创建epoll文件描述符(epoll也占用一个文件描述符)，自Linux2.6内核以后size参数被忽略。
+- int epoll_ctl(int epfd, int op,int fd, struct epoll_event *event)，为文件描述符设置感兴趣的事件，epfd即epoll_create的返回值，op共有三种取值:
+  - EPOLL_CTL_ADD: 注册新的fd到epfd中。
+  - EPOLL_CTL_MOD: 修改已经注册的fd的监听事件。
+  - EPOLL_CTL_DEL: 从epfd中删除一个fd。
+- int epoll_wait(int epfd, structepoll_event * events, int maxevents, int timeout)，即select操作，将结果保存到第二个参数events中。
 
 ### 取消事件处理
 
@@ -348,6 +404,379 @@ public final boolean isRegistered() {
 ```
 
 keyCount被addKey方法增加，参考通道-Selector注册一节。
+
+### poll
+
+EPollArrayWrapper.poll:
+
+```java
+int poll(long timeout) throws IOException {
+    updateRegistrations();
+    updated = epollWait(pollArrayAddress, NUM_EPOLLEVENTS, timeout, epfd);
+    //中断检测
+    for (int i=0; i<updated; i++) {
+        if (getDescriptor(i) == incomingInterruptFD) {
+            interruptedIndex = i;
+            interrupted = true;
+            break;
+        }
+    }
+    return updated;
+}
+```
+
+#### 兴趣(事件)处理
+
+这里与SelectionKey-兴趣设置一节相呼应。Java其实对epoll兴趣的注册提供了缓存机制，每一次的select/poll调用都会导致之前缓存的兴趣被注册。
+
+EPollArrayWrapper.updateRegistrations:
+
+```java
+private void updateRegistrations() {
+    synchronized (updateLock) {
+        int j = 0;
+        while (j < updateCount) {
+            int fd = updateDescriptors[j];
+            short events = getUpdateEvents(fd);
+            boolean isRegistered = registered.get(fd);
+            int opcode = 0;
+            if (events != KILLED) {
+                if (isRegistered) {
+                    opcode = (events != 0) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+                } else {
+                    opcode = (events != 0) ? EPOLL_CTL_ADD : 0;
+                }
+                if (opcode != 0) {
+                    epollCtl(epfd, opcode, fd, events);
+                    if (opcode == EPOLL_CTL_ADD) {
+                        registered.set(fd);
+                    } else if (opcode == EPOLL_CTL_DEL) {
+                        registered.clear(fd);
+                    }
+                }
+            }
+            j++;
+        }
+        updateCount = 0;
+    }
+}
+```
+
+整个逻辑一目了然，Java使用了BitSet来保存文件描述符是否被注册过。epollCtl即epoll_ctl函数，注意EPOLL_CTL_MOD会清除之前的兴趣标志位。
+
+epfd是在EPollArrayWrapper的构造器中被初始化，相关源码:
+
+```java
+// creates the epoll file descriptor
+epfd = epollCreate();
+```
+
+#### 事件数组
+
+epollWait即对epoll_wait的包装，结果保存在地址为pollArrayAddress的数组中，此数组在EPollArrayWrapper构造器中被初始化，源码:
+
+```java
+int allocationSize = NUM_EPOLLEVENTS * SIZE_EPOLLEVENT;
+AllocatedNativeObject pollArray = new AllocatedNativeObject(allocationSize, true);
+long pollArrayAddress = pollArray.address();
+```
+
+AllocatedNativeObject其实代表了一块连续的指定字节大小的堆外内存。SIZE_EPOLLEVENT代表了一个epoll事件的大小(字节数)，NUM_EPOLLEVENTS代表返回的最大事件数:
+
+```java
+private static final int SIZE_EPOLLEVENT = sizeofEPollEvent();
+private static final int NUM_EPOLLEVENTS  = Math.min(OPEN_MAX, 8192);
+```
+
+sizeofEPollEvent的native实现也很简单:
+
+```c
+JNIEXPORT jint JNICALL Java_sun_nio_ch_EPollArrayWrapper_sizeofEPollEvent(JNIEnv* env, jclass this) {
+    return sizeof(struct epoll_event);
+}
+```
+
+#### 中断检测
+
+结合下面wakeup一节，很容易理解poll方法的终端检测部分做了什么。
+
+### 就绪事件更新
+
+EPollSelectorImpl.updateSelectedKeys:
+
+```java
+private int updateSelectedKeys() {
+    int entries = pollWrapper.updated;
+    int numKeysUpdated = 0;
+    for (int i=0; i<entries; i++) {
+        int nextFD = pollWrapper.getDescriptor(i);
+        SelectionKeyImpl ski = fdToKey.get(Integer.valueOf(nextFD));
+        // ski is null in the case of an interrupt
+        if (ski != null) {
+            int rOps = pollWrapper.getEventOps(i);
+            if (selectedKeys.contains(ski)) {
+                if (ski.channel.translateAndSetReadyOps(rOps, ski)) {
+                    numKeysUpdated++;
+                }
+            } else {
+                ski.channel.translateAndSetReadyOps(rOps, ski);
+                if ((ski.nioReadyOps() & ski.nioInterestOps()) != 0) {
+                    selectedKeys.add(ski);
+                    numKeysUpdated++;
+                }
+            }
+        }
+    }
+    return numKeysUpdated;
+}
+```
+
+逻辑很清晰，就是一个更新SelectionKey的就绪事件并添加到selectedKeys集合的过程，同时可以发现这里并没有key移除的代码，这也是为什么我们需要在使用完之后进行手动移除的原因。
+
+我们来看一下是如何获取就绪事件的文件描述符和ops的。
+
+```java
+int getDescriptor(int i) {
+    int offset = SIZE_EPOLLEVENT * i + FD_OFFSET;
+    return pollArray.getInt(offset);
+}
+```
+
+实际上是通过Unsafe根据地址来进行获取的，关键在于描述符的地址。epoll_event的定义如下:
+
+```c
+typedef union epoll_data {
+    void    *ptr;
+    int      fd;
+    uint32_t u32;
+    uint64_t u64;
+} epoll_data_t;
+
+struct epoll_event {
+    uint32_t     events;    /* Epoll events */
+    epoll_data_t data;      /* User data variable */
+};
+```
+
+FD_OFFSET等于DATA_OFFSET，后者由native方法offsetofData获得:
+
+```c
+JNIEXPORT jint JNICALL Java_sun_nio_ch_EPollArrayWrapper_offsetofData(JNIEnv* env, jclass this) {
+    return offsetof(struct epoll_event, data);
+}
+```
+
+offsetof为Linux系统调用，返回结构体里指定字段的偏移。epoll_data_t为一个联合体，就可以理解了。
+
+getEventOps的实现很类似:
+
+```java
+int getEventOps(int i) {
+    int offset = SIZE_EPOLLEVENT * i + EVENT_OFFSET;
+    return pollArray.getInt(offset);
+}
+```
+
+EVENT_OFFSET为0.
+
+### 中断处理
+
+即EPollSelectorImpl.doSelect方法中的这一部分内容:
+
+```java
+if (pollWrapper.interrupted()) {
+    //这一步的目的是删除就绪结果中中断文件描述符的相关结果
+    pollWrapper.putEventOps(pollWrapper.interruptedIndex(), 0);
+    synchronized (interruptLock) {
+        //EPollArrayWrapper interrupted设为false
+        pollWrapper.clearInterrupted();
+        IOUtil.drain(fd0);
+        //可以再次响应中断
+        interruptTriggered = false;
+    }
+}
+```
+
+drain为native实现:
+
+```c
+JNIEXPORT jboolean JNICALL Java_sun_nio_ch_IOUtil_drain(JNIEnv *env, jclass cl, jint fd) {
+    char buf[128];
+    int tn = 0;
+    for (;;) {
+        int n = read(fd, buf, sizeof(buf));
+        tn += n;
+        if ((n < 0) && (errno != EAGAIN))
+            JNU_ThrowIOExceptionWithLastError(env, "Drain");
+        if (n == (int)sizeof(buf))
+            continue;
+        return (tn > 0) ? JNI_TRUE : JNI_FALSE;
+    }
+}
+```
+
+正如方法名的含义，这一步的目的是将管道中剩余的所有数据读取出来，防止下一次select时再次被作为就绪事件返回。到这里有个疑问: 删除结果集中的相关标志位是在updateSelectedKeys之后进行的，也就是说updateSelectedKeys方法里仍可以得到中断结果。其实解决方式就是这一句:
+
+```java
+if (ski != null)
+```
+
+中断文件描述符必然找不到与之对应的SelectionKey.
+
+## wakeup
+
+EPollSelectorImpl.wakeup:
+
+```java
+public Selector wakeup() {
+    synchronized (interruptLock) {
+        //interruptTriggered保证了相邻两次wakeup调用只有一次有效
+        if (!interruptTriggered) {
+            pollWrapper.interrupt();
+            interruptTriggered = true;
+        }
+    }
+    return this;
+}
+```
+
+EPollArrayWrapper.interrupt:
+
+```java
+public void interrupt() {
+    interrupt(outgoingInterruptFD);
+}
+```
+
+outgoingInterruptFD由initInterrupt方法设置:
+
+```java
+void initInterrupt(int fd0, int fd1) {
+    outgoingInterruptFD = fd1;
+    incomingInterruptFD = fd0;
+    epollCtl(epfd, EPOLL_CTL_ADD, fd0, EPOLLIN);
+}
+```
+
+而initInterrupt方法在EPollSelectorImpl的构造器中被调用:
+
+```java
+EPollSelectorImpl(SelectorProvider sp) {
+    long pipeFds = IOUtil.makePipe(false);
+    fd0 = (int) (pipeFds >>> 32);
+    fd1 = (int) pipeFds;
+    pollWrapper = new EPollArrayWrapper();
+    pollWrapper.initInterrupt(fd0, fd1);
+}
+```
+
+这里巧妙地使用了管道来唤醒Selector(epoll_wait)，epoll监听管道读的一端，当要唤醒epoll_wait时，向管道写入数据即可。管道是Linux中一种进程间通信的机制，但仅支持单向的通信，参考:
+
+[linux管道的那点事](http://blog.chinaunix.net/uid-27034868-id-3394243.html)
+
+[How to interrupt epoll_pwait with an appropriate signal? [duplicate]](http://stackoverflow.com/questions/9028934/how-to-interrupt-epoll-pwait-with-an-appropriate-signal)
+
+makePipe用于将两个文件描述符组合成为一个管道，返回的long型中高32位为读文件描述符，低32位为写文件描述符:
+
+```c
+JNIEXPORT jlong JNICALL Java_sun_nio_ch_IOUtil_makePipe(JNIEnv *env, jobject this, jboolean blocking) {
+    int fd[2];
+    if (pipe(fd) < 0) {
+        JNU_ThrowIOExceptionWithLastError(env, "Pipe failed");
+        return 0;
+    }
+    //设置文件描述符的阻塞模式
+    if (blocking == JNI_FALSE) {
+        if ((configureBlocking(fd[0], JNI_FALSE) < 0)
+            || (configureBlocking(fd[1], JNI_FALSE) < 0)) {
+            JNU_ThrowIOExceptionWithLastError(env, "Configure blocking failed");
+            close(fd[0]);
+            close(fd[1]);
+            return 0;
+        }
+    }
+    return ((jlong) fd[0] << 32) | (jlong) fd[1];
+}
+```
+
+pipe为Linux系统调用。这样initInterrupt方法中的逻辑就可以理解了。
+
+interrupt(outgoingInterruptFD)一行为native调用:
+
+```c
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_EPollArrayWrapper_interrupt(JNIEnv *env, jobject this, jint fd) {
+    int fakebuf[1];
+    fakebuf[0] = 1;
+    if (write(fd, fakebuf, 1) < 0) {
+        JNU_ThrowIOExceptionWithLastError(env,"write to interrupt fd failed");
+    }
+}
+```
+
+果然，写了一个int数字进去，剩下的参见上面select一节。
+
+## 关闭
+
+AbstractSelector.close:
+
+```java
+public final void close() throws IOException {
+    boolean open = selectorOpen.getAndSet(false);
+    if (!open)
+        return;
+    implCloseSelector();
+}
+```
+
+SelectorImpl.implCloseSelector:
+
+```java
+public void implCloseSelector() throws IOException {
+    wakeup();
+    synchronized (this) {
+        synchronized (publicKeys) {
+            synchronized (publicSelectedKeys) {
+                implClose();
+            }
+        }
+    }
+}
+```
+
+EPollSelectorImpl.implClose:
+
+```java
+protected void implClose() throws IOException {
+    if (closed)
+        return;
+    closed = true;
+    // prevent further wakeup
+    synchronized (interruptLock) {
+        interruptTriggered = true;
+    }
+    FileDispatcherImpl.closeIntFD(fd0);
+    FileDispatcherImpl.closeIntFD(fd1);
+    //关闭epoll
+    pollWrapper.closeEPollFD();
+    // it is possible
+    selectedKeys = null;
+    // Deregister channels
+    Iterator<SelectionKey> i = keys.iterator();
+    while (i.hasNext()) {
+        SelectionKeyImpl ski = (SelectionKeyImpl)i.next();
+        deregister(ski);
+        SelectableChannel selch = ski.channel();
+        if (!selch.isOpen() && !selch.isRegistered())
+            ((SelChImpl)selch).kill();
+        i.remove();
+    }
+    fd0 = -1;
+    fd1 = -1;
+}
+```
+
+一目了然。
 
 # 通道
 
@@ -576,6 +1005,10 @@ public SocketChannel accept() {
 
 accept0为native方法，可以看出，其负责设置了新的文件描述符，创建ScoketChannel对象，注意，默认为阻塞模式。底层实现仍为accept函数，和ServerSocket一样。
 
+## connect
+
+Linux connect系统调用。
+
 ## 关闭
 
 SocketChannel和FileChannel一样都是AbstractInterruptibleChannel的子类，所以close方法的实现是一样的:
@@ -661,6 +1094,31 @@ public void kill() throws IOException {
 }
 ```
 
+### 预关闭
+
+源码中nd.preClose(fd)用于对文件描述符进行预关闭，native实现位于FileDispatcherImpl.c:
+
+```c
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_preClose0(JNIEnv *env, jclass clazz, jobject fdo) {
+    jint fd = fdval(env, fdo);
+    if (preCloseFD >= 0) {
+        if (dup2(preCloseFD, fd) < 0)
+            JNU_ThrowIOExceptionWithLastError(env, "dup2 failed");
+    }
+}
+```
+
+dup2位为Linux系统调用，函数声明为:
+
+```c
+int dup2(int oldfd, int newfd);
+```
+
+作用为将oldfd拷贝给newfd的值，newfd原先指向的文件描述符将被关闭，preClose0方法中的preCloseFD是一个已经关闭的描述符，这样可以防止由于内核对文件描述符的重用造成的读到其它描述符指向的内容的问题，这里可以参考FileChannel-关闭一节中的相关说明，dup2参考Linux man page:
+
+[Linux Programmer's Manual DUP(2)](http://man7.org/linux/man-pages/man2/dup.2.html)
+
 我们可以用如下方式对文件描述符进行验证，假设有命令`nc -l -p 10010`对10010端口进行监听，我们使用简单的Java连接此端口，使用ps命令得到此nc的进程号，在/proc/进程号/fd便是此进程拥有的文件描述符，如下图(ls -lh):
 
 ![文件描述符](images/fd.png)
@@ -674,3 +1132,83 @@ public void kill() throws IOException {
 | 2     | 标准错误 | STDERR_FILENO | stderr |
 
 参考: [每天进步一点点——Linux中的文件描述符与打开文件之间的关系](http://blog.csdn.net/cywosp/article/details/38965239)
+
+### 关闭
+
+nd.close(fd)用以真正的关闭一个文件描述符，native由FileDispatcherImpl.c实现:
+
+```c
+static void closeFileDescriptor(JNIEnv *env, int fd) {
+    if (fd != -1) {
+        int result = close(fd);
+        if (result < 0)
+            JNU_ThrowIOExceptionWithLastError(env, "Close failed");
+    }
+}
+```
+
+close为Linux系统调用，引自man page的说法:
+
+> **close**() closes a file descriptor, so that it no longer refers to any file and may be reused. 
+
+所以close方法被调用后，文件描述符将被重用。
+
+### 线程安全
+
+SocketChannelImpl.kill方法中很值得玩味的一个细节:
+
+```java
+if (readerThread == 0 && writerThread == 0) {
+    nd.close(fd);
+    state = ST_KILLED;
+} else {
+    state = ST_KILLPENDING;
+}
+```
+
+当有线程正在当前文件描述符上读/写时，并不会马上调用close方法，而是**延迟关闭**。为什么呢?
+
+结合read方法部分源码:
+
+```java
+synchronized (stateLock) {
+    if (!isOpen()) {
+        return 0;
+    }
+    readerThread = NativeThread.current();
+}
+//here!
+for (;;) {
+    n = IOUtil.read(fd, buf, -1, nd);
+    if ((n == IOStatus.INTERRUPTED) && isOpen()) {
+        continue;
+    }
+    return IOStatus.normalize(n);
+}
+```
+
+如果我们不采用延迟关闭，而是直接调用close方法，有三个线程分别执行以下操作:
+
+- 关闭通道(1)。
+- 读(2)。
+- 资源申请(打开文件描述符, 3)。
+
+假设它们的执行出现以下时序:
+
+![时序](images/channel_close.png)
+
+可以看出，这样读线程便读到了其它文件的数据。解决的办法便是推迟，由读(或写)线程调用readerCleanup方法最终完成文件描述符的关闭:
+
+```java
+private void readerCleanup() throws IOException {
+    synchronized (stateLock) {
+        readerThread = 0;
+        if (state == ST_KILLPENDING)
+            kill();
+    }
+}
+```
+
+### 总结
+
+可能会有疑问，为啥普通的OIO socket关闭如此的简单粗暴?因为那是线程不安全的，相当于把保证线程安全的锅甩给了我们，而我们的使用场景又无需保证这一点(比如说，每个线程持有自己的连接)。:haha:
