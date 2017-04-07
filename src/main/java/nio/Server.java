@@ -5,6 +5,7 @@ import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 import java.util.Set;
 
@@ -39,17 +40,10 @@ public class Server {
                 while (iterator.hasNext()) {
                     key = iterator.next();
                     if (key.isAcceptable()) {
-                        //处理连接到服务器事件
-                    } else if (key.isConnectable()) {
-                        //连接到服务器
-                    } else if (key.isReadable() || key.isWritable()) {
-                        //处理读写
+                        SocketChannel client = channel.accept();
+                        client.configureBlocking(false);
+                        client.register(selector, SelectionKey.OP_WRITE);
                     }
-					/*
-					 * 移除处理过的通道
-					 * 因为selector不会自己移除处理过的，这也决定了只能用迭代器迭代
-					 */
-                    iterator.remove();
                 }
             }
         }

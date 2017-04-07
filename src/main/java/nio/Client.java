@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.Arrays;
@@ -49,6 +50,11 @@ public class Client {
         channel.write(ByteBuffer.wrap(dirty));
         int writed = channel.write(ByteBuffer.wrap(data));
         System.out.println(writed);
+    }
+
+    @Test
+    public void connectLocalHost() throws IOException {
+        new Socket().connect(new InetSocketAddress(8080));
     }
 
 }

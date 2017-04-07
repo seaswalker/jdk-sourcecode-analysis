@@ -12,6 +12,7 @@ SelectionKeyImpl.interestOps:
 
 ```java
 public SelectionKey interestOps(int ops) {
+    ensureValid();
     return nioInterestOps(ops);
 }
 ```
@@ -25,6 +26,10 @@ public SelectionKey nioInterestOps(int ops) {
     return this;
 }
 ```
+
+这里服务器和客户端有不同的实现。
+
+### 客户端
 
 SocketChannelImpl.translateAndSetInterestOps:
 
@@ -41,7 +46,26 @@ public void translateAndSetInterestOps(int ops, SelectionKeyImpl sk) {
 }
 ```
 
-POLLIN等便是Linux epoll事件，EPollSelectorImpl.putEventOps:
+### 服务器
+
+ServerSocketChannelImpl.translateAndSetInterestOps:
+
+```java
+public void translateAndSetInterestOps(int ops, SelectionKeyImpl sk) {
+    int newOps = 0;
+    if ((ops & SelectionKey.OP_ACCEPT) != 0)
+        newOps |= PollArrayWrapper.POLLIN;
+    sk.selector.putEventOps(sk, newOps);
+}
+```
+
+从这里我们可以得出结论: Java中的accept事件其实就是epoll的POLLIN，ServerSocket/Socket，ServerSocketChannel/SocketChannel本身是有Java抽象出来的概念，在底层系统实现中都是一个文件描述符。
+
+epoll支持的所有事件参考Linux man page:
+
+[Linux Programmer's Manual EPOLL_CTL(2)](http://man7.org/linux/man-pages/man2/epoll_ctl.2.html)
+
+EPollSelectorImpl.putEventOps:
 
 ```java
 public void putEventOps(SelectionKeyImpl ski, int ops) {
@@ -138,7 +162,7 @@ void cancel(SelectionKey k) {
 }
 ```
 
-cancelledKeys是一个Set，可以看出，cancel方法的调用并不会导致Selector的立即响应，参见Selector-select一节。
+这里将有效的标志位设为了false，cancelledKeys是一个Set，可以看出，cancel方法的调用并不会导致Selector的立即响应，参见Selector-select一节。正因为如此，假设我们将一个key取消后立即(在这两个过程之间没有发生select操作)再次注册，那么会导致CancelledKeyException，抛出的位置在SelectionKeyImpl的interestOps方法。
 
 # Selector
 
@@ -579,6 +603,40 @@ int getEventOps(int i) {
 
 EVENT_OFFSET为0.
 
+和SelectionKey-兴趣设置一节一样，这里服务器和客户端的处理也是不一样的。
+
+#### 服务器
+
+ServerSocketChannelImpl.translateReadyOps(initialOps为0):
+
+```java
+public boolean translateReadyOps(int ops, int initialOps, SelectionKeyImpl sk) {
+    int intOps = sk.nioInterestOps();
+    int oldOps = sk.nioReadyOps();
+    int newOps = initialOps;
+    if ((ops & PollArrayWrapper.POLLNVAL) != 0) {
+        // This should only happen if this channel is pre-closed while a
+        // selection operation is in progress
+        // ## Throw an error if this channel has not been pre-closed
+        return false;
+    }
+    if ((ops & (PollArrayWrapper.POLLERR
+                | PollArrayWrapper.POLLHUP)) != 0) {
+        newOps = intOps;
+        sk.nioReadyOps(newOps);
+        return (newOps & ~oldOps) != 0;
+    }
+    //检测OP_ACCEPT
+    if (((ops & PollArrayWrapper.POLLIN) != 0) &&
+        ((intOps & SelectionKey.OP_ACCEPT) != 0))
+            newOps |= SelectionKey.OP_ACCEPT;
+    sk.nioReadyOps(newOps);
+    return (newOps & ~oldOps) != 0;
+}
+```
+
+//TODO
+
 ### 中断处理
 
 即EPollSelectorImpl.doSelect方法中的这一部分内容:
@@ -908,6 +966,28 @@ public final SelectionKey register(Selector sel, int ops,Object att) {
 
 方法将首先检查当前通道是否已经向给定的Selector注册过了 ，AbstractSelectableChannel内部维护有一个SelectionKey数组，findKey方法便是遍历此数组逐一比较其Selector的过程。
 
+SelectableChannel.regist注释上提到，此方法可能会被阻塞如果当前有另一个线程阻塞在select上，这是怎么实现的呢?
+
+SelectorImpl.register方法需要对publicKeys加锁:
+
+```java
+synchronized (publicKeys) {
+    implRegister(k);
+}
+```
+
+而执行select操作的lockAndDoSelect方法同样需要对此属性加锁:
+
+```java
+synchronized (publicKeys) {
+    synchronized (publicSelectedKeys) {
+        return doSelect(timeout);
+    }
+}
+```
+
+epoll_wait的阻塞并不会释放锁。
+
 ## 读
 
 从类图中可以看出，只有SocketChannel才具有读写功能，ServerSocketChannel并不具备，这和Socket和ServerSocket的关系是一样的。
@@ -1211,4 +1291,128 @@ private void readerCleanup() throws IOException {
 
 ### 总结
 
-可能会有疑问，为啥普通的OIO socket关闭如此的简单粗暴?因为那是线程不安全的，相当于把保证线程安全的锅甩给了我们，而我们的使用场景又无需保证这一点(比如说，每个线程持有自己的连接)。:haha:
+可能会有疑问，为啥普通的OIO socket关闭如此的简单粗暴?因为那是线程不安全的，相当于把保证线程安全的锅甩给了我们，而我们的使用场景又无需保证这一点(比如说，每个线程持有自己的连接)。:haha
+
+# 如何让NIO跑满CPU
+
+我们通过几个不正常的情况来更加深入的了解NIO的实现原理，这里的NIO特指select操作所在的线程，"跑满"准确来说是让一个CPU核心满载，因为假设只有一个select线程。
+
+## 事件忽略
+
+假设我们的select代码如下所示:
+
+```java
+while (true) {
+    if (selector.select() > 0) {
+        Set<SelectionKey> keys = selector.selectedKeys();
+        Iterator<SelectionKey> iterator = keys.iterator();
+        SelectionKey key;
+        while (iterator.hasNext()) {
+            key = iterator.next();
+            if (key.isAcceptable()) {
+                //nothing
+            }
+            iterator.remove();
+        }
+    }
+}
+```
+
+然后我们再用一个普通的Socket去连接此服务监听的端口，触发accept事件:
+
+```java
+new Socket().connect(new InetSocketAddress(8080));
+```
+
+然后即可以看到一个CPU已跑满。这其实与epoll的两种事件触发机制有关:
+
+- 水平触发(LT): 当被监控的文件描述符发生感兴趣的事件时，epoll将会一直通知你，直到事件被处理。比如对于读事件来说，epoll将会一直通知你直到把事件产生的Socket的读缓冲读完。
+- 边沿触发(ET): 仅当事件发生变化时才会通知你。
+
+Java采用水平触发且不可更改，所以在上面的代码中，accept一直没有处理(调用ServerSocketChannel的accept方法)，epoll也就不会阻塞而是一直通知你。
+
+同时可以看出，我们只是在客户端一侧关闭了Socket连接，服务器没有(也没有机会有)取消epoll注册的操作，那epoll是如何处理这类连接(文件描述符)的呢?其实它会自动取消注册，参考Linux man page-Questions and answers Q6:
+
+[Linux Programmer's Manual EPOLL(7)](http://man7.org/linux/man-pages/man7/epoll.7.html)
+
+## SelectionKey不移除
+
+将上面的代码改为:
+
+```java
+while (true) {
+    if (selector.select() > 0) {
+        Set<SelectionKey> keys = selector.selectedKeys();
+        Iterator<SelectionKey> iterator = keys.iterator();
+        SelectionKey key;
+        while (iterator.hasNext()) {
+            key = iterator.next();
+            if (key.isAcceptable()) {
+                channel.accept();
+            }
+        }
+    }
+}
+```
+
+还是用事件忽略中的客户端连接代码，进行两次连接，第一次不会出现问题，第二次将导致CPU满载，且selector.select()始终返回0.
+
+问题的出现原因在于EPollSelectorImpl.updateSelectedKeys的这一部分:
+
+```java
+if (selectedKeys.contains(ski)) {
+    if (ski.channel.translateAndSetReadyOps(rOps, ski)) {
+        numKeysUpdated++;
+    }
+} 
+```
+
+可见，如果selectedKeys集合中已含有指定的key，那么只有在translateAndSetReadyOps返回true的情况下才会导致就绪事件数加一。
+
+ServerSocketChannelImpl.translateReadyOps部分源码:
+
+```java
+public boolean translateReadyOps(int ops, int initialOps, SelectionKeyImpl sk) {
+    int intOps = sk.nioInterestOps(); // Do this just once, it synchronizes
+    int oldOps = sk.nioReadyOps();
+    int newOps = initialOps;
+    sk.nioReadyOps(newOps);
+    return (newOps & ~oldOps) != 0;
+}
+```
+
+由于两次都是accept事件，所以此方法返回false，这就致使虽然有accept事件，但最终返回的就绪事件数仍为0.
+
+## 可写事件
+
+OP_WRITE的注册同样会导致满载，将代码修改为:
+
+```java
+while (true) {
+    if (selector.select() > 0) {
+        Set<SelectionKey> keys = selector.selectedKeys();
+        Iterator<SelectionKey> iterator = keys.iterator();
+        SelectionKey key;
+        while (iterator.hasNext()) {
+            key = iterator.next();
+            if (key.isAcceptable()) {
+                SocketChannel client = channel.accept();
+                client.configureBlocking(false);
+                client.register(selector, SelectionKey.OP_WRITE);
+            }
+            iterator.remove();
+        }
+    }
+}
+```
+
+问题的关键是理解在什么情况下可写事件会触发，对于Java使用的水平触发(LT)，**只要发送缓冲区不满，就是可写的**，可以想象，多数应用的多数情况下都会是可写的，所以正确的OP_WRITE使用姿势是: 当需要写的时候再去注册OP_WRITE事件。
+
+这里再跑个题，为什么Java要求注册到Selector的通道必须是非阻塞的(如果尝试注册阻塞的，会抛出IllegalBlockingModeException)，前提是epoll LT模式同时支持阻塞和非阻塞，但ET仅支持非阻塞。
+
+一般来说，我们的IO操作都是在select线程中完成的，我的理解是如果交由其它线程完成，那么其它线程IO完成和select线程下一次select这两个操作之间的顺序无法保证，很有可能出现当select线程进行下一次select时上一次通知的IO事件仍未被处理，这就造成了无谓的事件通知，况且这里的IO操作为从内核空间到用户空间的内存拷贝，完全取决于内存的性能，多线程并没有多大的意义。
+
+有了上面这个前提，以写为例，考虑这样一种情形: 假设发送缓冲区目前剩余50个字节大小，但是我们需要写入200个字节，对于阻塞写便会一直保持阻塞直到200字节能够完全放入到发送缓冲区，这无疑影响了其它IO事件的处理。
+
+# 空循环bug
+
