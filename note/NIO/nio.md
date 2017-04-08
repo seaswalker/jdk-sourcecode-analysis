@@ -1213,6 +1213,16 @@ int dup2(int oldfd, int newfd);
 
 参考: [每天进步一点点——Linux中的文件描述符与打开文件之间的关系](http://blog.csdn.net/cywosp/article/details/38965239)
 
+那么socket后面的数字又是指的什么呢(如果在Redhat7上执行同样的命令，可以看到socket行为红色闪烁，这表示为找不到所连接的文件)。
+
+这个数字其实是文件描述符的inode号，链接实际上指向/proc/net/tcp(6)或udp下的一行记录(所以找不到文件)，以inode号12884为例，执行命令: `cat /proc/net/tcp | grep 12884`:
+
+![FD](images/fd_inode.png)
+
+每一栏是什么意思执行命令`head -1 /proc/net/tcp`即可:
+
+![tcp_meaning](images/tcp_meaning.png)
+
 ### 关闭
 
 nd.close(fd)用以真正的关闭一个文件描述符，native由FileDispatcherImpl.c实现:
