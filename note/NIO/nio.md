@@ -620,8 +620,8 @@ public boolean translateReadyOps(int ops, int initialOps, SelectionKeyImpl sk) {
         // ## Throw an error if this channel has not been pre-closed
         return false;
     }
-    if ((ops & (PollArrayWrapper.POLLERR
-                | PollArrayWrapper.POLLHUP)) != 0) {
+    //pollhup和pollerr将导致感兴趣的事件的触发
+    if ((ops & (PollArrayWrapper.POLLERR | PollArrayWrapper.POLLHUP)) != 0) {
         newOps = intOps;
         sk.nioReadyOps(newOps);
         return (newOps & ~oldOps) != 0;
@@ -635,7 +635,9 @@ public boolean translateReadyOps(int ops, int initialOps, SelectionKeyImpl sk) {
 }
 ```
 
-//TODO
+#### 客户端
+
+略。
 
 ### 中断处理
 
@@ -1091,7 +1093,7 @@ Linux connect系统调用。
 
 ## 关闭
 
-SocketChannel和FileChannel一样都是AbstractInterruptibleChannel的子类，所以close方法的实现是一样的:
+SocketChannel和FileChannel一样都是v的子类，所以close方法的实现是一样的:
 
 ```java
 public final void close(){

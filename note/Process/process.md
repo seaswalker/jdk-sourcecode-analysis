@@ -152,31 +152,139 @@ pb.redirectInput(Redirect.INHERIT).redirectOutput(Redirect.INHERIT).redirectErro
 
 ## start
 
-简略版源码:
+ProcessImpl在不同的系统上有不同的实现，我们以Linux为准，所做的是将命令、参数以及环境转为byte数组，并初始化文件描述符数组，初始化的逻辑如下:
 
 ```java
-static Process start(String cmdarray[], Map<String,String> environment, String dir,
-                     ProcessBuilder.Redirect[] redirects,boolean redirectErrorStream) {
-    String envblock = ProcessEnvironment.toEnvironmentBlock(environment);
-    FileInputStream  f0 = null;
-    FileOutputStream f1 = null;
-    FileOutputStream f2 = null;
-    long[] stdHandles;
-    if (redirects == null) {
-        stdHandles = new long[] { -1L, -1L, -1L };
-    } else {
-        stdHandles = new long[3];
-        if (redirects[0] == Redirect.PIPE)
-            stdHandles[0] = -1L;
-        else if (redirects[0] == Redirect.INHERIT)
-            stdHandles[0] = fdAccess.getHandle(FileDescriptor.in);
-        else {
-            f0 = new FileInputStream(redirects[0].file());
-            stdHandles[0] = fdAccess.getHandle(f0.getFD());
-        }
-        //输出和错误完全一样
+int[] std_fds;
+if (redirects == null) {
+    std_fds = new int[] { -1, -1, -1 };
+} else {
+    std_fds = new int[3];
+    if (redirects[0] == Redirect.PIPE)
+        std_fds[0] = -1;
+    else if (redirects[0] == Redirect.INHERIT)
+         //在nio部分提到过，在Unix下0为标准输入，1为标准输出，2为错误输出
+        std_fds[0] = 0;
+    else {
+        f0 = new FileInputStream(redirects[0].file());
+        std_fds[0] = fdAccess.get(f0.getFD());
     }
-    return new ProcessImpl(cmdarray, envblock, dir, stdHandles, redirectErrorStream);
+}	
+```
+
+最后构造了一个UNIXProcess对象，UNIXProcess构造器源码:
+
+```java
+UNIXProcess(final byte[] prog,
+            final byte[] argBlock, final int argc,
+            final byte[] envBlock, final int envc,
+            final byte[] dir,
+            final int[] fds,
+            final boolean redirectErrorStream) {
+    pid = forkAndExec(launchMechanism.value,
+                      helperpath,
+                      prog,
+                      argBlock, argc,
+                      envBlock, envc,
+                      dir,
+                      fds,
+                      redirectErrorStream);
+    doPrivileged(new PrivilegedExceptionAction<Void>() {
+        public Void run() throws IOException {
+            initStreams(fds);
+            return null;
+        }});
 }
 ```
 
+### 运行模式
+
+枚举LaunchMechanism的定义为:
+
+```java
+private static enum LaunchMechanism {
+    FORK(1),
+    VFORK(3);
+    private int value;
+    LaunchMechanism(int x) {value = x;}
+};
+```
+
+fork和vfork其实是Linux中两种子进程的启动方式，关于它们的区别可参考:
+
+[fork vfork函数区别](http://blog.csdn.net/buaalei/article/details/5348382)
+
+字段launchMechanism在静态代码块中初始化:
+
+```java
+static {
+    launchMechanism = AccessController.doPrivileged(
+            new PrivilegedAction<LaunchMechanism>() {
+        public LaunchMechanism run() {
+            String s = System.getProperty(
+                "jdk.lang.Process.launchMechanism", "vfork");
+            return LaunchMechanism.valueOf(s.toUpperCase());
+        }
+    });
+}
+```
+
+在Linux上默认使用vfork，即无需拷贝拷贝父进程的数据，子进程执行时父进程必须等待。
+
+forkAndExec方法为native实现，由vfork系统调用实现。
+
+### 流初始化
+
+共可以获得三种流，方法名如下图:
+
+![stream.PNG](images/stream.PNG)
+
+其中errorStream对应子进程的错误输出流，inputStream对应子进程的标准输出流(未重定向的前提下)，outputStream对应子进程的标准输入流(未重定向的前提下)。
+
+UNIXProcess.initStreams:
+
+```java
+void initStreams(int[] fds) throws IOException {
+    stdin = (fds[0] == -1) ?
+        ProcessBuilder.NullOutputStream.INSTANCE :
+        new ProcessPipeOutputStream(fds[0]);
+    stdout = (fds[1] == -1) ?
+        ProcessBuilder.NullInputStream.INSTANCE :
+        new ProcessPipeInputStream(fds[1]);
+    stderr = (fds[2] == -1) ?
+        ProcessBuilder.NullInputStream.INSTANCE :
+        new ProcessPipeInputStream(fds[2]);
+    processReaperExecutor.execute(new Runnable() {
+        public void run() {
+            int exitcode = waitForProcessExit(pid);
+            UNIXProcess.this.processExited(exitcode);
+        }});
+}
+```
+
+上面提到的三个方法实际上就是返回这里的三个字段中的一个。注意forkAndExec方法会改变fds的值，在这里-1表示在ProcessBuilder中我们指定了重定向，比如我们将子进程的输出指定到一个文件，那么这里的stdin就是NullOutputStream。ProcessBuilder.NullOutputStream:
+
+```java
+static class NullOutputStream extends OutputStream {
+    static final NullOutputStream INSTANCE = new NullOutputStream();
+    private NullOutputStream() {}
+    public void write(int b) throws IOException {
+        throw new IOException("Stream closed");
+    }
+}
+```
+
+## waitFor
+
+UNIXProcess.waitFor:
+
+```java
+public synchronized int waitFor() {
+    while (!hasExited) {
+        wait();
+    }
+    return exitcode;
+}
+```
+
+wait就是Object的wait方法，那么问题来了，我们是被谁唤醒的呢?
