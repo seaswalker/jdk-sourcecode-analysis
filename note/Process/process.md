@@ -274,6 +274,71 @@ static class NullOutputStream extends OutputStream {
 }
 ```
 
+### 等待结束
+
+即initStreams方法中的:
+
+```java
+processReaperExecutor.execute(new Runnable() {
+    public void run() {
+        int exitcode = waitForProcessExit(pid);
+        UNIXProcess.this.processExited(exitcode);
+    }
+});
+```
+
+processReaperExecutor为Java线程池，所以这里使用了单独的线程来进行等待。waitForProcessExit为native实现，通过Linux waitpid及其相关系统调用实现，可参考Linux man或:
+
+[Linux中waitpid()函数的用法](http://blog.csdn.net/roland_sun/article/details/32084825)
+
+UNIXProcess.processExited:
+
+```java
+void processExited(int exitcode) {
+    synchronized (this) {
+        this.exitcode = exitcode;
+        hasExited = true;
+        //唤醒所有正在等待的线程
+        notifyAll();
+    }
+    if (stdout instanceof ProcessPipeInputStream)
+        ((ProcessPipeInputStream) stdout).processExited();
+    if (stderr instanceof ProcessPipeInputStream)
+        ((ProcessPipeInputStream) stderr).processExited();
+    if (stdin instanceof ProcessPipeOutputStream)
+        ((ProcessPipeOutputStream) stdin).processExited();
+}
+```
+
+我们来看一下processExited方法做了什么，以ProcessPipeInputStream为例:
+
+```java
+synchronized void processExited() {
+    try {
+        InputStream in = this.in;
+        if (in != null) {
+            InputStream stragglers = drainInputStream(in);
+            in.close();
+            this.in = stragglers;
+        }
+    } catch (IOException ignored) { }
+}
+```
+
+drainInputStream方法的作用检测输入流(即子进程的输出)中是否还有数据未被读取，如果有将其读取出来并包装为ByteArrayInputStream返回，否则 返回NullInputStream。
+
+### 为什么会阻塞
+
+回想之前在实际项目中遇到的问题: **如果我们不读取输入流(子进程的输出)的数据，那么waitFor方法将一直不能返回**。
+
+原因就在于在没有重定向的情况下进程和子进程之间使用管道进行通信，而管道的大小也是有一定的限制的，写满之后write调用便会阻塞。
+
+管道的大小可通过命令`ulimit -a`查看，如下图:
+
+![PipeSize](images/pipe_size.png)
+
+512字节。
+
 ## waitFor
 
 UNIXProcess.waitFor:
@@ -287,4 +352,62 @@ public synchronized int waitFor() {
 }
 ```
 
-wait就是Object的wait方法，那么问题来了，我们是被谁唤醒的呢?
+wait就是Object的wait方法，结合Process-start-等待结束即可 。
+
+## destroy
+
+destroy()和destroyForcibly()方法其实都是对私有方法destroy(boolean force)的调用，只不过前者参数为false，后者为 true:
+
+```java
+private void destroy(boolean force) {
+    synchronized (this) {
+        if (!hasExited)
+            destroyProcess(pid, force);
+    }
+    try { stdin.close();  } catch (IOException ignored) {}
+    try { stdout.close(); } catch (IOException ignored) {}
+    try { stderr.close(); } catch (IOException ignored) {}
+}
+```
+
+正如jdk的注释中所说，这里其实有潜在的竞争条件，即在!hasExited检查通过之后子进程执行完毕，同时有可能Linux会对进程号进行回收，从而导致进程误杀的情况，只不过概率相当小。
+
+destroyProcess为native方法:
+
+```c
+JNIEXPORT void JNICALL
+Java_java_lang_UNIXProcess_destroyProcess(JNIEnv *env,
+                                          jobject junk,
+                                          jint pid,
+                                          jboolean force) {
+    int sig = (force == JNI_TRUE) ? SIGKILL : SIGTERM;
+    kill(pid, sig);
+}
+```
+
+kill即Linux系统调用。
+
+## exitValue
+
+获取返回值:
+
+```java
+public synchronized int exitValue() {
+    if (!hasExited) {
+        throw new IllegalThreadStateException("process hasn't exited");
+    }
+    return exitcode;
+}
+```
+
+## isAlive
+
+jdk1.8加入的方法:
+
+```java
+@Override
+public synchronized boolean isAlive() {
+    return !hasExited;
+}
+```
+
