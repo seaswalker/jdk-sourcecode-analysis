@@ -29,4 +29,6 @@ JDK源码阅读笔记
 
 [Process](https://github.com/seaswalker/JDK/blob/master/note/Process/process.md)
 
+[HashMap](https://github.com/seaswalker/JDK/blob/master/note/HashMap/hashmap.md)
+
 
