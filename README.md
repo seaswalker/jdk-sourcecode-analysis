@@ -31,4 +31,6 @@ JDK源码阅读笔记
 
 [HashMap](https://github.com/seaswalker/JDK/blob/master/note/HashMap/hashmap.md)
 
+[LinkedHashMap](https://github.com/seaswalker/JDK/blob/master/note/LinkedHashMap/linkedhashmap.md)
+
 
