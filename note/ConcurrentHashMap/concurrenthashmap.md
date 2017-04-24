@@ -339,11 +339,15 @@ private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
             advance = true; // already processed
         else {
             synchronized (f) {
+                //3. 转移算法
+                //双重检查
                 if (tabAt(tab, i) == f) {
                     Node<K,V> ln, hn;
                     if (fh >= 0) {
+                        //runBit代表了当前桶位是否需要移动
                         int runBit = fh & n;
                         Node<K,V> lastRun = f;
+                        //这里是找出最后一个和头结点的移动属性相同的
                         for (Node<K,V> p = f.next; p != null; p = p.next) {
                             int b = p.hash & n;
                             if (b != runBit) {
@@ -359,6 +363,7 @@ private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
                             hn = lastRun;
                             ln = null;
                         }
+                        //构造无需移动和需要移动的链表
                         for (Node<K,V> p = f; p != lastRun; p = p.next) {
                             int ph = p.hash; K pk = p.key; V pv = p.val;
                             if ((ph & n) == 0)
@@ -366,8 +371,10 @@ private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
                             else
                                 hn = new Node<K,V>(ph, pk, pv, hn);
                         }
+                        //设置到新数组
                         setTabAt(nextTab, i, ln);
                         setTabAt(nextTab, i + n, hn);
+                        //将原数组的当前桶位设为MOVED，即已处理完(转移)
                         setTabAt(tab, i, fwd);
                         advance = true;
                     }
@@ -435,5 +442,176 @@ static final class ForwardingNode<K,V> extends Node<K,V> {
 }
 ```
 
-其哈希值为MOVED。
+其哈希值为MOVED。到这里我们便可以理解putVal方法这部分源码的作用了:
 
+```java
+else if ((fh = f.hash) == MOVED)
+    tab = helpTransfer(tab, f);
+```
+
+helpTransfer方法的实现和tryPresize方法的相关代码很像，在此不再赘述。
+
+##### 转移算法
+
+我们还是以链表为例，对于2的整次幂扩容来说，节点的转移其实只有两种情况:
+
+- 无需转移，即扩容前后节点的桶位不变。
+- 扩容后的桶位号为扩容前 + 原数组的大小，假设原数组大小为8，扩容后为16，有节点哈希值为11，原先在桶位3，那么扩容后位3 + 8 = 11.
+
+所以关键便在于如何判断是否需要转移。还是以大小8和16为例，8的取余mask为:
+
+0111
+
+而16的mask为:
+
+1111
+
+所以我们只要用哈希值 & 8，判断结果是否为零即可。
+
+### 红黑树
+
+再来回顾一下treeifyBin方法的相关源码:
+
+```java
+else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
+    synchronized (b) {
+        //双重检查
+        if (tabAt(tab, index) == b) {
+            TreeNode<K,V> hd = null, tl = null;
+            for (Node<K,V> e = b; e != null; e = e.next) {
+                TreeNode<K,V> p = new TreeNode<K,V>(e.hash, e.key, e.val, null, null);
+                if ((p.prev = tl) == null)
+                    hd = p;
+                else
+                    tl.next = p;
+                tl = p;
+            }
+            setTabAt(tab, index, new TreeBin<K,V>(hd));
+        }
+    }
+}
+```
+
+可见，向红黑树的转换是在锁的保护下进行的，通过一个for循环将所有的节点以TreeNode包装起来，注意，在循环里只是通过next属性进行连接，此时实际上还是一个链表形态，而真正的转化是在TreeBin的构造器中完成的。
+
+和ForwardingNode一样，TreeBin同样具有特殊的哈希值:
+
+```java
+static final int TREEBIN   = -2;
+```
+
+# get
+
+```java
+public V get(Object key) {
+    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+    int h = spread(key.hashCode());
+    if ((tab = table) != null && (n = tab.length) > 0 && (e = tabAt(tab, (n - 1) & h)) != null) {
+        if ((eh = e.hash) == h) {
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                //命中头结点
+                return e.val;
+        }
+        else if (eh < 0)
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {
+            //遍历当前桶位的节点链表
+            if (e.hash == h && ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+```
+
+有意思的在于第二个分支，即哈希值小于零。从上面put方法部分可以得知，共有两种情况节点的哈希值小于0:
+
+- ForwardingNode，已被转移。
+- TreeBin，红黑树节点。
+
+##  ForwardingNode
+
+find方法源码:
+
+```java
+Node<K,V> find(int h, Object k) {
+    outer: for (Node<K,V>[] tab = nextTable;;) {
+        Node<K,V> e; int n;
+        if (k == null || tab == null || (n = tab.length) == 0 ||
+            (e = tabAt(tab, (n - 1) & h)) == null)
+            return null;
+        for (;;) {
+            int eh; K ek;
+            if ((eh = e.hash) == h && ((ek = e.key) == k || (ek != null && k.equals(ek))))
+                return e;
+            if (eh < 0) {
+                if (e instanceof ForwardingNode) {
+                    //跳转到nextTable搜索
+                    tab = ((ForwardingNode<K,V>)e).nextTable;
+                    continue outer;
+                }
+                else
+                    //红黑树
+                    return e.find(h, k);
+            }
+            if ((e = e.next) == null)
+                return null;
+        }
+    }
+}
+```
+
+## 红黑树
+
+TreeBin.find:
+
+```java
+final Node<K,V> find(int h, Object k) {
+    if (k != null) {
+        for (Node<K,V> e = first; e != null; ) {
+            int s; K ek;
+            if (((s = lockState) & (WAITER|WRITER)) != 0) {
+                if (e.hash == h && ((ek = e.key) == k || (ek != null && k.equals(ek))))
+                    return e;
+                e = e.next;
+            }
+            else if (U.compareAndSwapInt(this, LOCKSTATE, s, s + READER)) {
+                TreeNode<K,V> r, p;
+                try {
+                    p = ((r = root) == null ? null : r.findTreeNode(h, k, null));
+                } finally {
+                    Thread w;
+                    if (U.getAndAddInt(this, LOCKSTATE, -READER) ==
+                        (READER|WAITER) && (w = waiter) != null)
+                        LockSupport.unpark(w);
+                }
+                return p;
+            }
+        }
+    }
+    return null;
+}
+```
+
+这里使用了读写锁的方式，而加锁的方式和AQS一个套路。当可以获得读锁时，采用搜索红黑树的方法进行节点搜索，这样时间复杂度是O(LogN)，而如果获得读锁失败(即表示当前有其它线程正在**改变树的结构**，比如进行红黑树的再平衡)，那么将采用线性的搜索策略。
+
+为什么可以进行线性搜索呢?因为红黑树的节点TreeNode继承自Node，所以**仍然保留有next指针(即线性遍历的能力)**。这一点可以从put-转为红黑树-红黑树一节得到反映，线性搜索的线程安全性通过next属性来保证:
+
+```java
+volatile Node<K,V> next;
+```
+
+TreeBin的构造器同样对树的结构进行了改变，ConcurrentHashMap使用volatile读写来保证线程安全的发布。
+
+从读写锁的引入可以看出，ConcurrentHashMap为保证最大程度的并行执行作出的努力。putTreeVal方法只有在更新树的结构时才会动用锁:
+
+```java
+lockRoot();
+try {
+    root = balanceInsertion(root, x);
+} finally {
+    unlockRoot();
+}
+```
+
+除此之外，由于读没有加锁，所以线程可以看到正在进行迁移的桶，但这其实并不会影响正确性，因为迁移是构造了新的链表，并不会影响原有的桶。
