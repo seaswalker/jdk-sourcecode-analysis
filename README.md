@@ -37,4 +37,6 @@ JDK源码阅读笔记
 
 [ConcurrentHashMap](https://github.com/seaswalker/JDK/blob/master/note/ConcurrentHashMap/concurrenthashmap.md)
 
+[ConcurrentLinkedQueue](https://github.com/seaswalker/JDK/blob/master/note/ConcurrentLinkedQueue/concurrentlinkedqueue.md)
+
 

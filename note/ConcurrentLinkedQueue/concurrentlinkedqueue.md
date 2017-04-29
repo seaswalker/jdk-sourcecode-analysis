@@ -14,10 +14,11 @@
 
 ```java
 public boolean offer(E e) {
+    //如果元素为null，那么抛出NPE
     checkNotNull(e);
     final Node<E> newNode = new Node<E>(e);
-
     for (Node<E> t = tail, p = t;;) {
+        //volatile读
         Node<E> q = p.next;
         if (q == null) {
             // p is last node
@@ -26,7 +27,7 @@ public boolean offer(E e) {
                     casTail(t, newNode);  // Failure is OK.
                 return true;
             }
-            // Lost CAS race to another thread; re-read next
+            //casNext竞争失败，再次读取p.next，此时(即q)不为空
         }
         else if (p == q)
             // We have fallen off list.  If tail is unchanged, it
@@ -35,10 +36,22 @@ public boolean offer(E e) {
             // reachable.  Else the new tail is a better bet.
             p = (t != (t = tail)) ? t : head;
         else
-            // Check for tail updates after two hops.
+            //每插入两个新节点时才会重新设置尾节点
             p = (p != t && t != (t = tail)) ? t : q;
     }
 }
 ```
 
-注意，由于ConcurrentLinkedQueue为无界队列，所以offer方法永远返回true。
+注意，由于ConcurrentLinkedQueue为无界队列，所以offer方法永远返回true。为什么说插入两个节点之后才会尝试重新设置尾节点呢?
+
+假设我们的线程执行casNext失败，那么说明此时tail/p指针的next指向必定不为空(即另外一个线程已经插入了一个节点)，节点状态可用下图来表示:
+
+![新节点插入](images/node_insert.png)
+
+在下面的代码中将p指向新节点或重新读取tail:
+
+```java
+p = (p != t && t != (t = tail)) ? t : q;
+```
+
+那么为什么不能每插入一个节点便更新一次tail指针呢，因为出于降低CAS线程竞争(空转)的考虑。
