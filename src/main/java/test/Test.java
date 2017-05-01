@@ -3,6 +3,8 @@ package test;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Test something.
@@ -22,9 +24,16 @@ public class Test {
 
     @org.junit.Test
     public void linkedQueue() {
-        ConcurrentLinkedQueue<String> queue = new ConcurrentLinkedQueue<>();
+        SomeQueue<String> queue = new SomeQueue<>();
         queue.offer("a");
-        queue.offer("b");
+        System.out.println(queue.poll());
+    }
+
+    @org.junit.Test
+    public void threadPool() {
+        ExecutorService service = Executors.newFixedThreadPool(1);
+        service.shutdown();
+        service.execute(() -> System.out.println("hello"));
     }
 
 }
