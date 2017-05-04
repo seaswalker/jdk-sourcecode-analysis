@@ -296,5 +296,115 @@ void os::interrupt(Thread* thread) {
 
 与java里已知的可被中断的阻塞大体可以找到对应关系。
 
+#### 任务获取
+
+```java
+private Runnable getTask() {
+	boolean timedOut = false; // Did the last poll() time out?
+	for (;;) {
+		int c = ctl.get();
+		int rs = runStateOf(c);
+		// 线程池已经关闭且队列中没有剩余的任务，退出
+		if (rs >= SHUTDOWN && (rs >= STOP || workQueue.isEmpty())) {
+			decrementWorkerCount();
+			return null;
+		}
+		int wc = workerCountOf(c);
+		// 如果启用了超时并且已经超时且队列中没有任务，线程退出
+		boolean timed = allowCoreThreadTimeOut || wc > corePoolSize;
+		if ((wc > maximumPoolSize || (timed && timedOut)) && (wc > 1 || workQueue.isEmpty())) {
+			if (compareAndDecrementWorkerCount(c))
+				return null;
+			continue;
+		}
+		try {
+			Runnable r = timed ? workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take();
+			if (r != null)
+				return r;
+			timedOut = true;
+		} catch (InterruptedException retry) {
+          	//如果被中断不是马上退出，而是在下一次循环中检查线程池状态
+			timedOut = false;
+		}
+	}
+}
+```
+
+结合runWorker方法可以发现，如果getTask返回null，那么即说明当前Worker线程应该退出。
+
+##### 超时
+
+allowCoreThreadTimeOut定义如下:
+
+```java
+private volatile boolean allowCoreThreadTimeOut;
+```
+
+默认为false，如果开启，Worker不会无限期等待任务，而是超时之后便退出。我们可以通过allowCoreThreadTimeOut方法进行设置:
+
+```java
+public void allowCoreThreadTimeOut(boolean value) {
+	if (value && keepAliveTime <= 0)
+		throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+	if (value != allowCoreThreadTimeOut) {
+		allowCoreThreadTimeOut = value;
+		if (value)
+			interruptIdleWorkers();
+	}
+}
+```
+
+注意同时需传入一个大于零的keepAliveTime。
+
+#### 退出
+
+Worker在退出时将触发processWorkerExit方法:
+
+```java
+private void processWorkerExit(Worker w, boolean completedAbruptly) {
+	if (completedAbruptly) // If abrupt, then workerCount wasn't adjusted
+		decrementWorkerCount();
+
+	final ReentrantLock mainLock = this.mainLock;
+	mainLock.lock();
+	try {
+		completedTaskCount += w.completedTasks;
+		workers.remove(w);
+	} finally {
+		mainLock.unlock();
+	}
+
+	tryTerminate();
+
+	int c = ctl.get();
+	if (runStateLessThan(c, STOP)) {
+		if (!completedAbruptly) {
+			int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
+			if (min == 0 && ! workQueue.isEmpty())
+				min = 1;
+			if (workerCountOf(c) >= min)
+				return; // replacement not needed
+		}
+		addWorker(null, false);
+	}
+}
+```
+
+其逻辑可以分为3个部分。
+
+##### 状态修改
+
+线程池内部使用如下变量统计总共完成的任务数:
+
+```java
+private long completedTaskCount;
+```
+
+在退出时Worker线程将自己完成的数量加至以上变量中。并且将自身从Worker Set中移除。
+
+##### 关闭线程池
+
+
+
 
 
