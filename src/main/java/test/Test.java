@@ -5,6 +5,7 @@ import java.text.SimpleDateFormat;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * Test something.
@@ -30,10 +31,13 @@ public class Test {
     }
 
     @org.junit.Test
-    public void threadPool() {
-        ExecutorService service = Executors.newFixedThreadPool(1);
-        service.shutdown();
-        service.execute(() -> System.out.println("hello"));
+    public void threadPool() throws InterruptedException {
+        ThreadPoolExecutor service = (ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+        service.execute(() -> {
+            throw new RuntimeException();
+        });
+        Thread.sleep(2000);
+        System.out.println(service.getPoolSize());
     }
 
 }

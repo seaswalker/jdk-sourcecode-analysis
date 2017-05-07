@@ -300,33 +300,33 @@ void os::interrupt(Thread* thread) {
 
 ```java
 private Runnable getTask() {
-	boolean timedOut = false; // Did the last poll() time out?
-	for (;;) {
-		int c = ctl.get();
-		int rs = runStateOf(c);
-		// 线程池已经关闭且队列中没有剩余的任务，退出
-		if (rs >= SHUTDOWN && (rs >= STOP || workQueue.isEmpty())) {
-			decrementWorkerCount();
-			return null;
-		}
-		int wc = workerCountOf(c);
-		// 如果启用了超时并且已经超时且队列中没有任务，线程退出
-		boolean timed = allowCoreThreadTimeOut || wc > corePoolSize;
-		if ((wc > maximumPoolSize || (timed && timedOut)) && (wc > 1 || workQueue.isEmpty())) {
-			if (compareAndDecrementWorkerCount(c))
-				return null;
-			continue;
-		}
-		try {
-			Runnable r = timed ? workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take();
-			if (r != null)
-				return r;
-			timedOut = true;
-		} catch (InterruptedException retry) {
-          	//如果被中断不是马上退出，而是在下一次循环中检查线程池状态
-			timedOut = false;
-		}
-	}
+    boolean timedOut = false; // Did the last poll() time out?
+    for (;;) {
+        int c = ctl.get();
+        int rs = runStateOf(c);
+        // 线程池已经关闭且队列中没有剩余的任务，退出
+        if (rs >= SHUTDOWN && (rs >= STOP || workQueue.isEmpty())) {
+            decrementWorkerCount();
+            return null;
+        }
+        int wc = workerCountOf(c);
+        // 如果启用了超时并且已经超时且队列中没有任务，线程退出
+        boolean timed = allowCoreThreadTimeOut || wc > corePoolSize;
+        if ((wc > maximumPoolSize || (timed && timedOut)) && (wc > 1 || workQueue.isEmpty())) {
+            if (compareAndDecrementWorkerCount(c))
+                return null;
+            continue;
+        }
+        try {
+            Runnable r = timed ? workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take();
+            if (r != null)
+                return r;
+            timedOut = true;
+        } catch (InterruptedException retry) {
+            //如果被中断不是马上退出，而是在下一次循环中检查线程池状态
+            timedOut = false;
+        }
+    }
 }
 ```
 
@@ -344,13 +344,13 @@ private volatile boolean allowCoreThreadTimeOut;
 
 ```java
 public void allowCoreThreadTimeOut(boolean value) {
-	if (value && keepAliveTime <= 0)
-		throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
-	if (value != allowCoreThreadTimeOut) {
-		allowCoreThreadTimeOut = value;
-		if (value)
-			interruptIdleWorkers();
-	}
+    if (value && keepAliveTime <= 0)
+        throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+    if (value != allowCoreThreadTimeOut) {
+        allowCoreThreadTimeOut = value;
+        if (value)
+            interruptIdleWorkers();
+    }
 }
 ```
 
@@ -362,31 +362,31 @@ Worker在退出时将触发processWorkerExit方法:
 
 ```java
 private void processWorkerExit(Worker w, boolean completedAbruptly) {
-	if (completedAbruptly) // If abrupt, then workerCount wasn't adjusted
-		decrementWorkerCount();
+    if (completedAbruptly) // If abrupt, then workerCount wasn't adjusted
+        decrementWorkerCount();
 
-	final ReentrantLock mainLock = this.mainLock;
-	mainLock.lock();
-	try {
-		completedTaskCount += w.completedTasks;
-		workers.remove(w);
-	} finally {
-		mainLock.unlock();
-	}
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        completedTaskCount += w.completedTasks;
+        workers.remove(w);
+    } finally {
+        mainLock.unlock();
+    }
 
-	tryTerminate();
+    tryTerminate();
 
-	int c = ctl.get();
-	if (runStateLessThan(c, STOP)) {
-		if (!completedAbruptly) {
-			int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
-			if (min == 0 && ! workQueue.isEmpty())
-				min = 1;
-			if (workerCountOf(c) >= min)
-				return; // replacement not needed
-		}
-		addWorker(null, false);
-	}
+    int c = ctl.get();
+    if (runStateLessThan(c, STOP)) {
+        if (!completedAbruptly) {
+            int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
+            if (min == 0 && ! workQueue.isEmpty())
+                min = 1;
+            if (workerCountOf(c) >= min)
+                return; // replacement not needed
+        }
+        addWorker(null, false);
+    }
 }
 ```
 
@@ -404,7 +404,82 @@ private long completedTaskCount;
 
 ##### 关闭线程池
 
+tryTerminate方法将会尝试关闭线程池。
 
+```java
+final void tryTerminate() {
+    for (;;) {
+        int c = ctl.get();
+        if (isRunning(c) || runStateAtLeast(c, TIDYING) ||
+            (runStateOf(c) == SHUTDOWN && ! workQueue.isEmpty()))
+            return;
+        if (workerCountOf(c) != 0) { // Eligible to terminate
+            interruptIdleWorkers(ONLY_ONE);
+            return;
+        }
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            if (ctl.compareAndSet(c, ctlOf(TIDYING, 0))) {
+                try {
+                    //空实现
+                    terminated();
+                } finally {
+                    ctl.set(ctlOf(TERMINATED, 0));
+                    termination.signalAll();
+                }
+                return;
+            }
+        } finally {
+            mainLock.unlock();
+        }
+        // else retry on failed CAS
+    }
+}
+```
+
+什么情况下才会尝试调用interruptIdleWorkers呢?
+
+- 当前状态为STOP，即执行了shutdownNow()方法。
+- 当前状态为SHUTDOWN且任务队列为null，这正对应shutdown()方法被调用且所有任务已执行完毕。
+
+那么为什么只中断一个Worker线程而不是全部呢?猜测是这相当于链式唤醒，一个唤醒另一个直到最后一个将状态最终修改为TERMINATED。
+
+```java
+termination.signalAll();
+```
+
+用于唤醒正在等待线程终结的线程，termination定义如下:
+
+```java
+private final Condition termination = mainLock.newCondition();
+```
+
+awaitTermination方法部分源码:
+
+```java
+nanos = termination.awaitNanos(nanos);
+```
+
+##### 线程重生
+
+为什么叫重生呢?首先回顾一下runWorker方法任务执行的相关源码:
+
+```java
+try {
+    task.run();
+} catch (RuntimeException x) {
+    thrown = x; throw x;
+} catch (Error x) {
+    thrown = x; throw x;
+} catch (Throwable x) {
+    thrown = x; throw new Error(x);
+} finally {
+    afterExecute(task, thrown);
+}
+```
+
+可以看到，**异常又被重新抛了出去**，也就是说如果我们任务出现了未检查异常就会导致Worker线程的退出，而processWorkerExit方法将会检测当前线程池是否还需要再增加Worker，如果是由于任务逻辑异常导致的退出势必是需要增加的，这便是"重生"。
 
 
 
