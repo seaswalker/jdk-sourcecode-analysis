@@ -481,5 +481,55 @@ try {
 
 可以看到，**异常又被重新抛了出去**，也就是说如果我们任务出现了未检查异常就会导致Worker线程的退出，而processWorkerExit方法将会检测当前线程池是否还需要再增加Worker，如果是由于任务逻辑异常导致的退出势必是需要增加的，这便是"重生"。
 
+# submit
+
+我们以单参数Callable<T> task方法为例，AbstractExecutorService.submit:
+
+```java
+public <T> Future<T> submit(Callable<T> task) {
+    RunnableFuture<T> ftask = newTaskFor(task);
+    execute(ftask);
+    return ftask;
+}
+```
+
+AbstractExecutorService.newTaskFor:
+
+```java
+protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
+    return new FutureTask<T>(callable);
+}
+```
+
+被包装成了一个FutureTask对象:
+
+![FutureTask](images/FutureTask.jpg)
+
+FutureTask组合了Runnable和Future两个接口。下面我们来看一下其主要方法的实现。
+
+## get
+
+```java
+public V get() {
+    int s = state;
+    if (s <= COMPLETING)
+        s = awaitDone(false, 0L);
+    return report(s);
+}
+```
+
+state为状态标识，其声明(和可取的值)如下:
+
+```java
+private volatile int state;
+private static final int NEW          = 0;
+private static final int COMPLETING   = 1;
+private static final int NORMAL       = 2;
+private static final int EXCEPTIONAL  = 3;
+private static final int CANCELLED    = 4;
+private static final int INTERRUPTING = 5;
+private static final int INTERRUPTED  = 6;
+```
+
 
 
