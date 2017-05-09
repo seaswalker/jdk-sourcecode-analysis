@@ -481,7 +481,7 @@ try {
 
 可以看到，**异常又被重新抛了出去**，也就是说如果我们任务出现了未检查异常就会导致Worker线程的退出，而processWorkerExit方法将会检测当前线程池是否还需要再增加Worker，如果是由于任务逻辑异常导致的退出势必是需要增加的，这便是"重生"。
 
-# submit
+# submit & FutureTask
 
 我们以单参数Callable<T> task方法为例，AbstractExecutorService.submit:
 
@@ -531,5 +531,139 @@ private static final int INTERRUPTING = 5;
 private static final int INTERRUPTED  = 6;
 ```
 
+显然get方法的核心便是用于进行等待的awaitDone方法:
 
+```java
+private int awaitDone(boolean timed, long nanos) {
+    final long deadline = timed ? System.nanoTime() + nanos : 0L;
+    WaitNode q = null;
+    boolean queued = false;
+    for (;;) {
+        if (Thread.interrupted()) {
+            removeWaiter(q);
+            throw new InterruptedException();
+        }
+        int s = state;
+        if (s > COMPLETING) {
+            //已经完成
+            if (q != null)
+                q.thread = null;
+            return s;
+        }
+        else if (s == COMPLETING)
+            //正在完成，只需要让CPU空转进行等待即可
+            Thread.yield();
+        else if (q == null)
+            q = new WaitNode();
+        else if (!queued)
+            //CAS将新节点q设为等待链表的头结点
+            queued = UNSAFE.compareAndSwapObject(this, waitersOffset, q.next = waiters, q);
+        else if (timed) {
+            nanos = deadline - System.nanoTime();
+            if (nanos <= 0L) {
+                removeWaiter(q);
+                return state;
+            }
+            LockSupport.parkNanos(this, nanos);
+        }
+        else
+            LockSupport.park(this);
+    }
+}
+```
+
+这里并没有使用Lock或是Condition，而是直接使用了类似AQS等待队列的思想。我们来看一下WaitNode的类图:
+
+![WaitNode](images/WaitNode.jpg)
+
+属性thread取自构造器:
+
+```java
+WaitNode() { thread = Thread.currentThread(); }
+```
+
+而report方法用于根据最后的状态采取对应的动作，比如抛出异常或者是返回结果:
+
+```java
+private V report(int s) throws ExecutionException {
+    Object x = outcome;
+    if (s == NORMAL)
+        return (V)x;
+    if (s >= CANCELLED)
+        throw new CancellationException();
+    throw new ExecutionException((Throwable)x);
+}
+```
+
+## run
+
+很自然的想到一个问题: 是在哪里将状态设为已完成的呢?
+
+```java
+public void run() {
+    //runner屏障，防止任务重复执行
+    if (state != NEW || !UNSAFE.compareAndSwapObject(this, runnerOffset, null, Thread.currentThread()))
+        return;
+    try {
+        Callable<V> c = callable;
+        //volatile读
+        if (c != null && state == NEW) {
+            //窗口开始
+            V result;
+            boolean ran;
+            try {
+                result = c.call();
+                ran = true;
+                //窗口结束
+            } catch (Throwable ex) {
+                result = null;
+                ran = false;
+                setException(ex);
+            }
+            if (ran)
+                set(result);
+        }
+    } finally {
+        // 解除runner屏障
+        runner = null;
+        // state must be re-read after nulling runner to prevent
+        // leaked interrupts
+        int s = state;
+        if (s >= INTERRUPTING)
+            handlePossibleCancellationInterrupt(s);
+    }
+}
+```
+
+set和setException方法便是用于改变任务的状态，通知我们的等待线程，将在后面进行说明。
+
+这里最有意思的是handlePossibleCancellationInterrupt方法的调用，注释中提到的"泄漏的中断"指的是什么呢?其实在任务call方法调用前后存在一个状态被其它线程修改的时间窗口，窗口的起止位置见上面源码。
+
+在这个窗口时间内，另外一个线程完全可能通过对cancel方法的调用将状态改为INTERRUPTING或CANCELLED。cancel方法的说明见下面，注意，一旦当前状态不再是NEW，那么set和setException方法便不会执行，因为其前提条件是状态为NEW，set方法部分源码:
+
+```java
+protected void set(V v) {
+    if (UNSAFE.compareAndSwapInt(this, stateOffset, NEW, COMPLETING)) {
+        //...
+    }
+}
+```
+
+所以handlePossibleCancellationInterrupt被执行的条件是:
+
+**在业务逻辑(call方法)执行期间发生了cancell调用**。
+
+```java
+private void handlePossibleCancellationInterrupt(int s) {
+    if (s == INTERRUPTING)
+        while (state == INTERRUPTING)
+            Thread.yield(); // wait out pending interrupt
+}
+```
+
+线程到这里便会空转等待，直到cancel线程将状态最终修改为INTERRUPTED。为什么要这么做呢?
+
+猜测Doug Lea大神是为了保证被取消的线程晚于取消线程退出。
+
+这里还有一个很有意思的问题，这里能不能清除中断标志呢?答案是不能。因为cancel靠中断取消任务的执行，同时我们也有可能利用中断语义自主结束任务的执行，FutureTask在这里不能分辨出是取消还是用户中断。那么问题来了，额外再引入一个标志变量可否?
 

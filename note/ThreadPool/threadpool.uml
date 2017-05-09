@@ -13,7 +13,7 @@
 <XPD:OBJ name="OwnedElements[0]" type="UMLModel" guid="An7cAfT5J0KyA+x6elvQ9wAA">
 <XPD:ATTR name="Name" type="string">classes</XPD:ATTR>
 <XPD:REF name="Namespace">/BW+2tgduUWitNzvXCvo6wAA</XPD:REF>
-<XPD:ATTR name="#OwnedDiagrams" type="integer">5</XPD:ATTR>
+<XPD:ATTR name="#OwnedDiagrams" type="integer">6</XPD:ATTR>
 <XPD:OBJ name="OwnedDiagrams[0]" type="UMLClassDiagram" guid="pTbzGCSEPkG+75gWGzrM3AAA">
 <XPD:ATTR name="Name" type="string">ThreadPoolExecutor</XPD:ATTR>
 <XPD:REF name="DiagramOwner">An7cAfT5J0KyA+x6elvQ9wAA</XPD:REF>
@@ -935,7 +935,46 @@
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
-<XPD:ATTR name="#OwnedElements" type="integer">30</XPD:ATTR>
+<XPD:OBJ name="OwnedDiagrams[5]" type="UMLClassDiagram" guid="3UY8nv24wE24Ni7EPIfrUgAA">
+<XPD:ATTR name="Name" type="string">WaitNode</XPD:ATTR>
+<XPD:REF name="DiagramOwner">An7cAfT5J0KyA+x6elvQ9wAA</XPD:REF>
+<XPD:OBJ name="DiagramView" type="UMLClassDiagramView" guid="B+WNd03y7kKjZbgBBuPFLQAA">
+<XPD:REF name="Diagram">3UY8nv24wE24Ni7EPIfrUgAA</XPD:REF>
+<XPD:ATTR name="#OwnedViews" type="integer">1</XPD:ATTR>
+<XPD:OBJ name="OwnedViews[0]" type="UMLClassView" guid="4Y+KTWhaxkODvCIOcLXxLgAA">
+<XPD:ATTR name="LineColor" type="string">clMaroon</XPD:ATTR>
+<XPD:ATTR name="FillColor" type="string">$00B9FFFF</XPD:ATTR>
+<XPD:ATTR name="Left" type="integer">308</XPD:ATTR>
+<XPD:ATTR name="Top" type="integer">136</XPD:ATTR>
+<XPD:ATTR name="Width" type="integer">127</XPD:ATTR>
+<XPD:ATTR name="Height" type="integer">69</XPD:ATTR>
+<XPD:REF name="Model">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+<XPD:OBJ name="NameCompartment" type="UMLNameCompartmentView" guid="SAMe+p1ywkKA+1ypmJNxUQAA">
+<XPD:OBJ name="NameLabel" type="LabelView" guid="DtlAY6OY1kqXxygVxtWX1gAA">
+<XPD:ATTR name="FontStyle" type="integer">1</XPD:ATTR>
+<XPD:ATTR name="Text" type="string">WaitNode</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="StereotypeLabel" type="LabelView" guid="zCbnnViCmkOmXbouL7YRNQAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="PropertyLabel" type="LabelView" guid="W76VaiZso0+2XSIcsHRuKAAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:OBJ name="AttributeCompartment" type="UMLAttributeCompartmentView" guid="zEUSAaPk00iVMjAxV+8TDAAA">
+<XPD:REF name="Model">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OperationCompartment" type="UMLOperationCompartmentView" guid="iXVrLc6e6kS6Poww/b3A1AAA">
+<XPD:REF name="Model">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="TemplateParameterCompartment" type="UMLTemplateParameterCompartmentView" guid="/dfm79NRdEuxGA5Nt3D5hgAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+<XPD:REF name="Model">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:ATTR name="#OwnedElements" type="integer">31</XPD:ATTR>
 <XPD:OBJ name="OwnedElements[0]" type="UMLInterface" guid="SAxl15kPEkm6V0JPLiSJjgAA">
 <XPD:ATTR name="Name" type="string">Executor</XPD:ATTR>
 <XPD:REF name="Namespace">An7cAfT5J0KyA+x6elvQ9wAA</XPD:REF>
@@ -1414,6 +1453,26 @@
 <XPD:REF name="Views[1]">qk0XN/afLEOu+AeUClyObQAA</XPD:REF>
 <XPD:REF name="Views[2]">Q18dU6o3E0GDKkgKAdSiMAAA</XPD:REF>
 <XPD:REF name="Views[3]">w6kRnXKNwkKY0hmqAAJsLQAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OwnedElements[30]" type="UMLClass" guid="gW5Y7EKESUC3V3SuLMltRgAA">
+<XPD:ATTR name="Name" type="string">WaitNode</XPD:ATTR>
+<XPD:REF name="Namespace">An7cAfT5J0KyA+x6elvQ9wAA</XPD:REF>
+<XPD:ATTR name="#Views" type="integer">4</XPD:ATTR>
+<XPD:REF name="Views[0]">4Y+KTWhaxkODvCIOcLXxLgAA</XPD:REF>
+<XPD:REF name="Views[1]">zEUSAaPk00iVMjAxV+8TDAAA</XPD:REF>
+<XPD:REF name="Views[2]">iXVrLc6e6kS6Poww/b3A1AAA</XPD:REF>
+<XPD:REF name="Views[3]">/dfm79NRdEuxGA5Nt3D5hgAA</XPD:REF>
+<XPD:ATTR name="#Attributes" type="integer">2</XPD:ATTR>
+<XPD:OBJ name="Attributes[0]" type="UMLAttribute" guid="JYAsJM0ajU+SK/CKAk3XBQAA">
+<XPD:ATTR name="Name" type="string">volatile Thread thread</XPD:ATTR>
+<XPD:ATTR name="Visibility" type="UMLVisibilityKind">vkPackage</XPD:ATTR>
+<XPD:REF name="Owner">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="Attributes[1]" type="UMLAttribute" guid="mcAYY+b440yPVGJIrNlU4QAA">
+<XPD:ATTR name="Name" type="string">volatile WaitNode next</XPD:ATTR>
+<XPD:ATTR name="Visibility" type="UMLVisibilityKind">vkPackage</XPD:ATTR>
+<XPD:REF name="Owner">gW5Y7EKESUC3V3SuLMltRgAA</XPD:REF>
+</XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
