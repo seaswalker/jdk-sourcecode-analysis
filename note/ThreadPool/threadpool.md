@@ -189,6 +189,15 @@ private boolean addWorker(Runnable firstTask, boolean core) {
 }
 ```
 
+### 核心 vs 最大线程数
+
+注意execute方法中的细节，第一次addWorker调用的core参数为true，即表示已corePoolSize为上限，后两次为false。这就说明了execute方法执行时遵从一下顺序进行尝试:
+
+- 如果当前线程数小于corePoolSize，那么增加线程。
+- 尝试加入队列。
+- 如果入队失败那么尝试将线程数增加至maximumPoolSize。
+- 如果还是失败，那么交给RejectedExecutionHandler。
+
 ### Worker
 
 这里的"线程(即Worker)"其实是ThreadPoolExecutor的内部类。
@@ -354,7 +363,21 @@ public void allowCoreThreadTimeOut(boolean value) {
 }
 ```
 
-注意同时需传入一个大于零的keepAliveTime。
+注意同时需传入一个大于零的keepAliveTime。所以受这两个参数的影响，当没有任务执行时线程数并不一定等于corePoolSize。
+
+##### 超额线程回收 
+
+这里的超额指超出corePoolSize的线程，源码中有一处隐蔽的细节:
+
+```java
+boolean timed = allowCoreThreadTimeOut || wc > corePoolSize;
+```
+
+**当线程数大于corePoolSize时timed也为true**，再结合下面的条件判断可以得出结论: **当线程池当前的线程数超过corePoolSize且队列为空且corePoolSize不为0(0是被允许的)，超出的线程会退出**。
+
+这一点可以使用测试代码test.Test的maxPoolSize方法进行验证。
+
+另一种减少线程数的方法就是调用setCorePoolSize或setMaximumPoolSize重设线程池相关参数。
 
 #### 退出
 
@@ -364,7 +387,6 @@ Worker在退出时将触发processWorkerExit方法:
 private void processWorkerExit(Worker w, boolean completedAbruptly) {
     if (completedAbruptly) // If abrupt, then workerCount wasn't adjusted
         decrementWorkerCount();
-
     final ReentrantLock mainLock = this.mainLock;
     mainLock.lock();
     try {
@@ -667,3 +689,217 @@ private void handlePossibleCancellationInterrupt(int s) {
 
 这里还有一个很有意思的问题，这里能不能清除中断标志呢?答案是不能。因为cancel靠中断取消任务的执行，同时我们也有可能利用中断语义自主结束任务的执行，FutureTask在这里不能分辨出是取消还是用户中断。那么问题来了，额外再引入一个标志变量可否?
 
+## cancel
+
+```java
+public boolean cancel(boolean mayInterruptIfRunning) {
+    if (!(state == NEW && UNSAFE.compareAndSwapInt(this, stateOffset, NEW,
+        mayInterruptIfRunning ? INTERRUPTING : CANCELLED)))
+        return false;
+    try {    // in case call to interrupt throws exception
+        if (mayInterruptIfRunning) {
+            try {
+                Thread t = runner;
+                if (t != null)
+                    t.interrupt();
+            } finally { // final state
+                UNSAFE.putOrderedInt(this, stateOffset, INTERRUPTED);
+            }
+        }
+    } finally {
+        finishCompletion();
+    }
+    return true;
+}
+```
+
+可以看出，只有任务尚处于NEW状态时此方法才会返回true。这里有一个有意思的问题，为什么对于INTERRUPTED状态的设置使用putOrderedInt方法呢?
+
+putOrderedInt方法是一种底层的优化手段，效果就是**对volatile变量进行普通写操作**，也就是说并不保证可见性，可以参考:
+
+[AtomicXXX.lazySet(…) in terms of happens before edges](http://stackoverflow.com/questions/7557156/atomicxxx-lazyset-in-terms-of-happens-before-edges)
+
+可以进行此处优化的原因是执行到这里时状态(state)必定为INTERRUPTING或CANCELLED，而对于get/run等方法其实并不关心状态具体是哪一种，get方法源码回顾:
+
+```java
+public V get() throws InterruptedException, ExecutionException {
+    int s = state;
+    if (s <= COMPLETING)
+        s = awaitDone(false, 0L);
+    return report(s);
+}
+```
+
+只要state大于COMPLETING便会直接report，既然对其它线程没有影响也就没必要保证可见性(再加一次内存屏障了)。
+
+finishCompletion方法用以最后执行唤醒等待线程等操作:
+
+```java
+private void finishCompletion() {
+    // assert state > COMPLETING;
+    for (WaitNode q; (q = waiters) != null;) {
+        if (UNSAFE.compareAndSwapObject(this, waitersOffset, q, null)) {
+            for (;;) {
+                Thread t = q.thread;
+                if (t != null) {
+                    q.thread = null;
+                    LockSupport.unpark(t);
+                }
+                WaitNode next = q.next;
+                if (next == null)
+                    break;
+                q.next = null; // unlink to help gc
+                q = next;
+            }
+            break;
+        }
+    }
+    //模板方法，空实现
+    done();
+    callable = null;        // to reduce footprint
+}
+```
+
+其实就是一个遍历等待链表并逐个unpark的过程。
+
+## set
+
+```java
+protected void set(V v) {
+    if (UNSAFE.compareAndSwapInt(this, stateOffset, NEW, COMPLETING)) {
+        outcome = v;
+        UNSAFE.putOrderedInt(this, stateOffset, NORMAL); // final state
+        finishCompletion();
+    }
+}
+```
+
+一目了然。
+
+# shutdown
+
+```java
+public void shutdown() {
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        //设置状态
+        advanceRunState(SHUTDOWN);
+        interruptIdleWorkers();
+    } finally {
+        mainLock.unlock();
+    }
+    tryTerminate();
+}
+```
+
+这里加了锁，是时候总结一下这个mainLock用在哪些地方了:
+
+- shutdown & shutdownNow
+- awaitTermination
+- getPoolSize
+- getActiveCount
+- getLargestPoolSize
+- getTaskCount
+- getCompletedTaskCount
+- toString
+
+可见，锁用在对Worker集合的操作以及线程池的关闭、线程数量获取上。tryTerminate方法已经见识过了，这里重点在于interruptIdleWorkers:
+
+```java
+private void interruptIdleWorkers(boolean onlyOne) {
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        for (Worker w : workers) {
+            Thread t = w.thread;
+            if (!t.isInterrupted() && w.tryLock()) {
+                try {
+                    t.interrupt();
+                } catch (SecurityException ignore) {
+                } finally {
+                    w.unlock();
+                }
+            }
+            if (onlyOne)
+                break;
+        }
+    } finally {
+        mainLock.unlock();
+    }
+}
+```
+
+onlyOne参数为false，这里最有意思的便是`w.tryLock()`。回顾之前Worker部分，Worker继承自AbstractQueuedSynchronizer，而**Worker对业务逻辑的执行处于其自身锁的保护之下**，也就是说，如果Worker当前正在由任务执行，根本不可能被中断，这就符合了线程池shutdown不会中断正在执行的任务的语义。由于interruptIdleWorkers执行时线程池的状态已被修改为SHUTDOWN，所以在下一次进行任务获取的时候Worker线程自然会感知到shutdown调用，等到将队列中所有任务执行完毕时自然也就退出了，参考上面任务获取一节。
+
+# shutdownNow
+
+```java
+public List<Runnable> shutdownNow() {
+    List<Runnable> tasks;
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        advanceRunState(STOP);
+        interruptWorkers();
+        tasks = drainQueue();
+    } finally {
+        mainLock.unlock();
+    }
+    tryTerminate();
+    return tasks;
+}
+```
+
+这里会将所有尚未来得及执行的任务一并返回。
+
+```java
+private void interruptWorkers() {
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        for (Worker w : workers)
+            w.interruptIfStarted();
+    } finally {
+        mainLock.unlock();
+    }
+}
+```
+
+Worker.interruptIfStarted:
+
+```java
+void interruptIfStarted() {
+    Thread t;
+    if (getState() >= 0 && (t = thread) != null && !t.isInterrupted()) {
+        try {
+            t.interrupt();
+        } catch (SecurityException ignore) {
+        }
+    }
+}
+```
+
+`getState() >= 0`表示当前Worker已启动。没有获取锁直接中断，这便是和shutdown的区别了。drainQueue其实是对BlockingQueue接口drainTo方法的调用，因为线程池的队列必须是一个BlockingQueue。
+
+# getActiveCount
+
+此方法用以获取线程池中当前正在执行任务的线程数，其实现很有趣:
+
+```java
+public int getActiveCount() {
+    final ReentrantLock mainLock = this.mainLock;
+    mainLock.lock();
+    try {
+        int n = 0;
+        for (Worker w : workers)
+            if (w.isLocked())
+                ++n;
+        return n;
+    } finally {
+        mainLock.unlock();
+    }
+}
+```
+
+是通过判断Worker是否持有锁完成的，新技能get。
