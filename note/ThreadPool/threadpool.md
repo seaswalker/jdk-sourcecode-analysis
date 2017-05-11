@@ -903,3 +903,14 @@ public int getActiveCount() {
 ```
 
 是通过判断Worker是否持有锁完成的，新技能get。
+
+# finalize
+
+ThreadPoolExecutor覆盖了此方法:
+
+```java
+protected void finalize() {
+    shutdown();
+}
+```
+

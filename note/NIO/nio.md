@@ -522,7 +522,7 @@ JNIEXPORT jint JNICALL Java_sun_nio_ch_EPollArrayWrapper_sizeofEPollEvent(JNIEnv
 
 #### 中断检测
 
-结合下面wakeup一节，很容易理解poll方法的终端检测部分做了什么。
+结合下面wakeup一节，很容易理解poll方法的中断检测部分做了什么。
 
 ### 就绪事件更新
 
@@ -1093,7 +1093,7 @@ Linux connect系统调用。
 
 ## 关闭
 
-SocketChannel和FileChannel一样都是v的子类，所以close方法的实现是一样的:
+SocketChannel和FileChannel一样都是AbstractInterruptibleChannel的子类，所以close方法的实现是一样的:
 
 ```java
 public final void close(){
