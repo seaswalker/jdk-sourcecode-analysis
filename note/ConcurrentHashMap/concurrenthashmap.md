@@ -615,3 +615,245 @@ try {
 ```
 
 除此之外，由于读没有加锁，所以线程可以看到正在进行迁移的桶，但这其实并不会影响正确性，因为迁移是构造了新的链表，并不会影响原有的桶。
+
+# 计数
+
+在putVal方法的结尾通过调用addCount方法(略去大小检查，扩容部分，这里我们只关心计数)进行计数:
+
+```java
+private final void addCount(long x, int check) {
+    CounterCell[] as; long b, s;
+    if ((as = counterCells) != null ||
+        !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {
+        CounterCell a; long v; int m;
+        boolean uncontended = true;
+        if (as == null || (m = as.length - 1) < 0 ||
+            (a = as[ThreadLocalRandom.getProbe() & m]) == null ||
+            !(uncontended = U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
+            fullAddCount(x, uncontended);
+            return;
+        }
+    }
+}
+```
+
+计数的关键便是counterCells属性:
+
+```java
+private transient volatile CounterCell[] counterCells;
+```
+
+CounterCell是ConcurrentHashMapd的内部类:
+
+```java
+@sun.misc.Contended static final class CounterCell {
+    volatile long value;
+    CounterCell(long x) { value = x; }
+}
+```
+
+Contended注解的作用是将类的字段以64字节的填充行包围以解决伪共享问题。其实这里的计数方式就是改编自LongAdder，以最大程度地降低CAS失败空转的几率。
+
+条件判断:
+
+```java
+if ((as = counterCells) != null || !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {
+    //...
+}
+```
+
+非常有意思 ，如果counterCells为null，那么尝试用baseCount进行计数，如果事实上只有一个线程或多个线程单竞争的频率较低，对baseCount的CAS操作并不会失败，所以可以得到结论 : **如果竞争程度较低(没有CAS失败)，那么其实用的是volatile变量baseCount来计数，只有当线程竞争严重(出现CAS失败)时才会改用LongAdder的方式**。
+
+baseCount声明如下:
+
+```java
+private transient volatile long baseCount;
+```
+
+再来看一下什么条件下会触发fullAddCount方法:
+
+```java
+if (as == null || (m = as.length - 1) < 0 || (a = as[ThreadLocalRandom.getProbe() & m]) == null ||
+    !(uncontended = U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
+    //...
+}
+```
+
+ThreadLocalRandom.getProbe()的返回值决定了线程和哪一个CounterCell相关联，查看源码可以发现，此方法返回的其实是Thread的下列字段的值:
+
+```java
+@sun.misc.Contended("tlr")
+int threadLocalRandomProbe;
+```
+
+我们暂且不管这个值是怎么算出来，将其当做一个**线程唯一**的值即可。所以fullAddCount执行的条件是(或):
+
+- CounterCell数组为null。
+- CounterCell数组大小为0.
+- CounterCell数组线程对应的下标值为null。
+- CAS更新线程特定的CounterCell失败。
+
+fullAddCount方法的实现其实和LongAdder的父类Striped64的longAccumulate大体一致:
+
+```java
+private final void fullAddCount(long x, boolean wasUncontended) {
+    int h;
+    if ((h = ThreadLocalRandom.getProbe()) == 0) {
+        ThreadLocalRandom.localInit();      // force initialization
+        h = ThreadLocalRandom.getProbe();
+        wasUncontended = true;
+    }
+    boolean collide = false;                // True if last slot nonempty
+    for (;;) {
+        CounterCell[] as; CounterCell a; int n; long v;
+        //1.
+        if ((as = counterCells) != null && (n = as.length) > 0) {
+            if ((a = as[(n - 1) & h]) == null) {
+                if (cellsBusy == 0) {            // Try to attach new Cell
+                    CounterCell r = new CounterCell(x); // Optimistic create
+                    if (cellsBusy == 0 && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+                        boolean created = false;
+                        try {               // Recheck under lock
+                            CounterCell[] rs; int m, j;
+                            if ((rs = counterCells) != null &&
+                                (m = rs.length) > 0 &&
+                                rs[j = (m - 1) & h] == null) {
+                                rs[j] = r;
+                                created = true;
+                            }
+                        } finally {
+                            cellsBusy = 0;
+                        }
+                        if (created)
+                            //新Cell创建成功，退出方法
+                            break;
+                        continue;           // Slot is now non-empty
+                    }
+                }
+                collide = false;
+            }
+            else if (!wasUncontended)       // CAS already known to fail
+                wasUncontended = true;      // Continue after rehash
+            else if (U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))
+                break;
+            else if (counterCells != as || n >= NCPU)
+                collide = false;            // At max size or stale
+            else if (!collide)
+                collide = true;
+            else if (cellsBusy == 0 && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+                try {
+                    //扩容
+                    if (counterCells == as) {// Expand table unless stale
+                        CounterCell[] rs = new CounterCell[n << 1];
+                        for (int i = 0; i < n; ++i)
+                            rs[i] = as[i];
+                        counterCells = rs;
+                    }
+                } finally {
+                    cellsBusy = 0;
+                }
+                collide = false;
+                continue;                   // Retry with expanded table
+            }
+            //rehash
+            h = ThreadLocalRandom.advanceProbe(h);
+        }
+        //2.
+        else if (cellsBusy == 0 && counterCells == as && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+            boolean init = false;
+            try {
+                //获得锁之后再次检测是否已被初始化
+                if (counterCells == as) {
+                    CounterCell[] rs = new CounterCell[2];
+                    rs[h & 1] = new CounterCell(x);
+                    counterCells = rs;
+                    init = true;
+                }
+            } finally {
+                //锁释放
+                cellsBusy = 0;
+            }
+            if (init)
+                //计数成功，退出方法
+                break;
+        }
+      //3. 
+        else if (U.compareAndSwapLong(this, BASECOUNT, v = baseCount, v + x))
+            break;                          // Fall back on using base
+    }
+}
+```
+
+从源码中可以看出，在初始情况下probe其实是0的，也就是说在一开始的时候都是更新到第一个cell中的，直到出现CAS失败。
+
+整个方法的逻辑较为复杂，我们按照上面列出的fullAddCount执行条件进行对应说明。
+
+## cell数组为null或empty
+
+容易看出，这里对应的是fullAddCount方法的源码2处。cellBusy的定义如下:
+
+```java
+private transient volatile int cellsBusy;
+```
+
+这里其实将其当做锁来使用，即只允许在某一时刻只有一个线程正在进行CounterCell数组的初始化或扩容，其值为1说明有线程正在进行上述操作。
+
+默认创建了大小为2的CounterCell数组。
+
+## 下标为null或CAS失败
+
+这里便对应源码的1处，各种条件分支不再展开详细描述，注意一下几点:
+
+### rehash
+
+当Cell数组不为null和empty时，每次循环便会导致重新哈希值，这样做的目的是用再次生成哈希值的方式降低线程竞争。
+
+### 最大CounterCell数
+
+取NCPU:
+
+```java
+static final int NCPU = Runtime.getRuntime().availableProcessors();
+```
+
+不过从上面扩容部分源码可以看出，最大值并不一定是NCPU，因为采用的是2倍扩容，准确来说是最小的大于等于NCPU的2的整次幂(初始大小为2)。
+
+注意下面这个分支:
+
+```java
+else if (counterCells != as || n >= NCPU)
+    collide = false;
+```
+
+此分支会将collide置为false，从而致使下次循环`else if (!collide)`必定得到满足，这也就保证了扩容分支不会被执行。
+
+## baseCount分支
+
+还会尝试对此变量进行更新，有意思。
+
+# size
+
+```java
+public int size() {
+    long n = sumCount();
+    return ((n < 0L) ? 0 : (n > (long)Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int)n);
+}
+```
+
+核心在于sumCount方法:
+
+```java
+final long sumCount() {
+    CounterCell[] as = counterCells; CounterCell a;
+    long sum = baseCount;
+    if (as != null) {
+        for (int i = 0; i < as.length; ++i) {
+            if ((a = as[i]) != null)
+                sum += a.value;
+        }
+    }
+    return sum;
+}
+```
+
+求和的时候**带上了baseCount**，剩下的就 一目了然了。
