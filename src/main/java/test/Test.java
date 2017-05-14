@@ -47,6 +47,11 @@ public class Test {
         System.out.println(service.getLargestPoolSize());
     }
 
+    @org.junit.Test
+    public void threadLocal() {
+        ThreadLocal<String> local = ThreadLocal.withInitial(() -> "hello");
+    }
+
     private class StupidTask implements Runnable {
 
         private final int id;

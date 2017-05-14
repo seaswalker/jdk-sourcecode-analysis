@@ -141,3 +141,89 @@ private void set(ThreadLocal<?> key, Object value) {
 }
 ```
 
+# 注意
+
+ThreadLocalMap的底层实现貌似是基于一个叫做"Knuth  Algorithm"的算法，在这里不再细究其实现细节，但有几个地方值得注意。
+
+## 扩容
+
+不同于Map接口的实现，ThreadLocalMap的扩容似乎没有上限限制，resize方法部分源码可以证明:
+
+```java
+private void resize() {
+    Entry[] oldTab = table;
+    int oldLen = oldTab.length;
+    int newLen = oldLen * 2;
+    Entry[] newTab = new Entry[newLen];
+    //...
+}
+```
+
+## 哈希冲突
+
+不同于喜闻乐见的HashMap用链表 + 红黑树的方式解决哈希冲突，这里用的应该是线性探查法，即如果根据哈希值计算得来的位置不为空，那么将继续尝试下一个位置。
+
+这一点可以从resize方法的下列源码得到证明:
+
+```java
+int h = k.threadLocalHashCode & (newLen - 1);
+while (newTab[h] != null)
+    h = nextIndex(h, newLen);
+newTab[h] = e;
+```
+
+## 哈希值
+
+ThreadLocalMap使用的哈希值源自ThreadLocal的下列属性:
+
+```java
+private final int threadLocalHashCode = nextHashCode();
+private static int nextHashCode() {
+    return nextHashCode.getAndAdd(HASH_INCREMENT);
+}
+```
+
+而nextHashCode属性则是AtomicInteger类型，HASH_INCREMENT定义:
+
+```java
+private static final int HASH_INCREMENT = 0x61c88647;
+```
+
+## 清除
+
+由于ThreadLocalMap的key(即ThreadLocal)为弱引用，所以当其被回收时，势必需要将value置为null以便于进行垃圾回收。那么这个清除的时机又是什么呢?
+
+答案是get, set, remove都有可能。
+
+# Lambda支持
+
+jdk8支持使用以下方式进行初始化:
+
+```java
+ThreadLocal<String> local = ThreadLocal.withInitial(() -> "hello");
+```
+
+withInitial源码:
+
+```java
+public static <S> ThreadLocal<S> withInitial(Supplier<? extends S> supplier) {
+    return new SuppliedThreadLocal<>(supplier);
+}
+```
+
+SuppliedThreadLocal是ThreadLocal的内部类，也是其子类：
+
+```java
+static final class SuppliedThreadLocal<T> extends ThreadLocal<T> {
+    private final Supplier<? extends T> supplier;
+    SuppliedThreadLocal(Supplier<? extends T> supplier) {
+        this.supplier = Objects.requireNonNull(supplier);
+    }
+    @Override
+    protected T initialValue() {
+        return supplier.get();
+    }
+}
+```
+
+一目了然。
