@@ -380,14 +380,14 @@ backlog指socket里的最大排队客户端连接数，默认为50，参考:
 
 ```java
  void socketBind(InetAddress address, int port) {
-	int nativefd = checkAndReturnNativeFD();
-	bind0(nativefd, address, port, exclusiveBind);
-	if (port == 0) {
-		localport = localPort0(nativefd);
-	} else {
-		localport = port;
-	}
-	this.address = address;
+    int nativefd = checkAndReturnNativeFD();
+    bind0(nativefd, address, port, exclusiveBind);
+    if (port == 0) {
+        localport = localPort0(nativefd);
+    } else {
+        localport = port;
+    }
+    this.address = address;
 }
 ```
 
@@ -399,12 +399,18 @@ bind0和localPort0，native实现。
 
 ```java
 void socketListen(int backlog) {
-	int nativefd = checkAndReturnNativeFD();
-	listen0(nativefd, backlog);
+    int nativefd = checkAndReturnNativeFD();
+    listen0(nativefd, backlog);
 }
 ```
 
 native实现。从这里可以看出，**Java层面上的bind其实是系统级上的bind和listen两个操作**。
+
+backlog即TCP中的同名参数，指内核维护的accept队列大小，取值为/proc/sys/net/core/somaxconn数值(128)和listen函数backlog参数两者的最小值，所以如果需要调大此参数需要同时修改两处位置。
+
+除了accept队列外，在3次握手的过程中还有一个syns队列，其保存的是"半连接"，即服务器收到了客户端的syn，也向客户端回了syn+ack但没收到客户端ack的连接。此值由配置文件/proc/sys/net/ipv4/tcp_max_syn_backlog决定，在CentOS release 6.5上此数值为2048.
+
+参考: [浅谈tcp socket的backlog参数](http://www.jianshu.com/p/e6f2036621f4)
 
 ## accept
 
@@ -412,30 +418,30 @@ native实现。从这里可以看出，**Java层面上的bind其实是系统级�
 
 ```java
 void socketAccept(SocketImpl s) throws IOException {
-	int nativefd = checkAndReturnNativeFD();
-	int newfd = -1;
-	InetSocketAddress[] isaa = new InetSocketAddress[1];
-	if (timeout <= 0) {
-		newfd = accept0(nativefd, isaa);
-	} else {
-		configureBlocking(nativefd, false);
-		try {
-			waitForNewConnection(nativefd, timeout);
-			newfd = accept0(nativefd, isaa);
-			if (newfd != -1) {
-				configureBlocking(newfd, true);
-			}
-		} finally {
-			configureBlocking(nativefd, true);
-		}
-	}
-	/* Update (SocketImpl)s' fd */
-	fdAccess.set(s.fd, newfd);
-	/* Update socketImpls remote port, address and localport */
-	InetSocketAddress isa = isaa[0];
-	s.port = isa.getPort();
-	s.address = isa.getAddress();
-	s.localport = localport;
+    int nativefd = checkAndReturnNativeFD();
+    int newfd = -1;
+    InetSocketAddress[] isaa = new InetSocketAddress[1];
+    if (timeout <= 0) {
+        newfd = accept0(nativefd, isaa);
+    } else {
+        configureBlocking(nativefd, false);
+        try {
+            waitForNewConnection(nativefd, timeout);
+            newfd = accept0(nativefd, isaa);
+            if (newfd != -1) {
+                configureBlocking(newfd, true);
+            }
+        } finally {
+            configureBlocking(nativefd, true);
+        }
+    }
+    /* Update (SocketImpl)s' fd */
+    fdAccess.set(s.fd, newfd);
+    /* Update socketImpls remote port, address and localport */
+    InetSocketAddress isa = isaa[0];
+    s.port = isa.getPort();
+    s.address = isa.getAddress();
+    s.localport = localport;
 }
 ```
 
