@@ -14,7 +14,7 @@
 
 ```java
 public int await() {
-	return dowait(false, 0L);
+    return dowait(false, 0L);
 }
 ```
 
@@ -22,59 +22,59 @@ doWait方法简略版源码:
 
 ```java
 private int dowait(boolean timed, long nanos) {
-	final ReentrantLock lock = this.lock;
-	lock.lock();
-	try {
-		final Generation g = generation;
-		// 未到达(检查点)数减一
-		int index = --count;
-      	 // 已达到检查点，执行给定的任务
-		if (index == 0) {  
-			boolean ranAction = false;
-			try {
-				final Runnable command = barrierCommand;
-				if (command != null)
-					command.run();
-				ranAction = true;
-				nextGeneration();
-				return 0;
-			} finally {
-				if (!ranAction)
-					breakBarrier();
-			}
-		}
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        final Generation g = generation;
+        // 未到达(检查点)数减一
+        int index = --count;
+         // 已达到检查点，执行给定的任务
+        if (index == 0) {
+            boolean ranAction = false;
+            try {
+                final Runnable command = barrierCommand;
+                if (command != null)
+                    command.run();
+                ranAction = true;
+                nextGeneration();
+                return 0;
+            } finally {
+                if (!ranAction)
+                    breakBarrier();
+            }
+        }
 
-		// 尚有线程未到达检查点
-		for (;;) {
-			try {
-            	 // 等待
-				if (!timed)
-					trip.await();
-				else if (nanos > 0L)
-					nanos = trip.awaitNanos(nanos);
-			} catch (InterruptedException ie) {
-				if (g == generation && ! g.broken) {
-					breakBarrier();
-					throw ie;
-				} else {
-					Thread.currentThread().interrupt();
-				}
-			}
+        // 尚有线程未到达检查点
+        for (;;) {
+            try {
+                 // 等待
+                if (!timed)
+                    trip.await();
+                else if (nanos > 0L)
+                    nanos = trip.awaitNanos(nanos);
+            } catch (InterruptedException ie) {
+                if (g == generation && ! g.broken) {
+                    breakBarrier();
+                    throw ie;
+                } else {
+                    Thread.currentThread().interrupt();
+                }
+            }
 
-			if (g.broken)
-				throw new BrokenBarrierException();
+            if (g.broken)
+                throw new BrokenBarrierException();
 
-			if (g != generation)
-				return index;
+            if (g != generation)
+                return index;
 
-			if (timed && nanos <= 0L) {
-				breakBarrier();
-				throw new TimeoutException();
-			}
-		}
-	} finally {
-		lock.unlock();
-	}
+            if (timed && nanos <= 0L) {
+                breakBarrier();
+                throw new TimeoutException();
+            }
+        }
+    } finally {
+        lock.unlock();
+    }
 }
 ```
 
@@ -84,11 +84,11 @@ private int dowait(boolean timed, long nanos) {
 
 ```java
 private void nextGeneration() {
-	// signal completion of last generation
-	trip.signalAll();
-	// set up next generation
-	count = parties;
-	generation = new Generation();
+    // signal completion of last generation
+    trip.signalAll();
+    // set up next generation
+    count = parties;
+    generation = new Generation();
 }
 ```
 

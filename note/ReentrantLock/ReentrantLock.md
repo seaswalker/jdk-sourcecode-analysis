@@ -12,7 +12,7 @@
 
 ```java
 public void lock() {
-	sync.lock();
+    sync.lock();
 }
 ```
 
@@ -24,7 +24,7 @@ public void lock() {
 
 ```java
 public ReentrantLock(boolean fair) {
-	sync = fair ? new FairSync() : new NonfairSync();
+    sync = fair ? new FairSync() : new NonfairSync();
 }
 ```
 
@@ -40,10 +40,10 @@ NonfairSync.lock:
 
 ```java
 final void lock() {
-	if (compareAndSetState(0, 1))
-		setExclusiveOwnerThread(Thread.currentThread());
-	else
-		acquire(1);
+    if (compareAndSetState(0, 1))
+        setExclusiveOwnerThread(Thread.currentThread());
+    else
+        acquire(1);
 }
 ```
 
@@ -53,7 +53,7 @@ AbstractQueuedSynchronizer.compareAndSetState:
 
 ```java
 protected final boolean compareAndSetState(int expect, int update) {
-	return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
+    return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
 }
 ```
 
@@ -74,8 +74,8 @@ setExclusiveOwnerThread方法用以记录是哪个线程当前持有锁。
 
 ```java
 public final void acquire(int arg) {
-	if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
-		selfInterrupt();
+    if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        selfInterrupt();
 }
 ```
 
@@ -85,7 +85,7 @@ NonfairSync.tryAcquire:
 
 ```java
 protected final boolean tryAcquire(int acquires) {
-	return nonfairTryAcquire(acquires);
+    return nonfairTryAcquire(acquires);
 }
 ```
 
@@ -93,26 +93,26 @@ Sync.nonfairTryAcquire:
 
 ```java
 final boolean nonfairTryAcquire(int acquires) {
-	final Thread current = Thread.currentThread();
-  	//获取重入次数
-	int c = getState();
-  	//再次检查是否没有线程持有当前锁
-	if (c == 0) {
-		if (compareAndSetState(0, acquires)) {
-			setExclusiveOwnerThread(current);
-			return true;
-		}
-	}
-  	//是否当前线程正在重入
-	else if (current == getExclusiveOwnerThread()) {
-		int nextc = c + acquires;
-      	//支持的最大重入次数: Ingteger.MAX_VALUE
-		if (nextc < 0) // overflow
-			throw new Error("Maximum lock count exceeded");
-		setState(nextc);
-		return true;
-	}
-	return false;
+    final Thread current = Thread.currentThread();
+    //获取重入次数
+    int c = getState();
+    //再次检查是否没有线程持有当前锁
+    if (c == 0) {
+        if (compareAndSetState(0, acquires)) {
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    //是否当前线程正在重入
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        //支持的最大重入次数: Ingteger.MAX_VALUE
+        if (nextc < 0) // overflow
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    return false;
 }
 ```
 
@@ -152,18 +152,18 @@ AbstractQueuedSynchronizer.addWaiter():
 
 ```java
 private Node addWaiter(Node mode) {
-	Node node = new Node(Thread.currentThread(), mode);
-	// Try the fast path of enq; backup to full enq on failure
-	Node pred = tail;
-	if (pred != null) {
-		node.prev = pred;
-		if (compareAndSetTail(pred, node)) {
-			pred.next = node;
-			return node;
-		}
-	}
-	enq(node);
-	return node;
+    Node node = new Node(Thread.currentThread(), mode);
+    // Try the fast path of enq; backup to full enq on failure
+    Node pred = tail;
+    if (pred != null) {
+        node.prev = pred;
+        if (compareAndSetTail(pred, node)) {
+            pred.next = node;
+            return node;
+        }
+    }
+    enq(node);
+    return node;
 }
 ```
 
@@ -171,20 +171,20 @@ private Node addWaiter(Node mode) {
 
 ```java
 private Node enq(final Node node) {
-	for (;;) {
-		Node t = tail;
-		if (t == null) { // Must initialize
-          	//可见，head其实是一个"空的Node"
-			if (compareAndSetHead(new Node()))
-				tail = head;
-		} else {
-			node.prev = t;
-			if (compareAndSetTail(t, node)) {
-				t.next = node;
-				return t;
-			}
-		}
-	}
+    for (;;) {
+        Node t = tail;
+        if (t == null) { // Must initialize
+            //可见，head其实是一个"空的Node"
+            if (compareAndSetHead(new Node()))
+                tail = head;
+        } else {
+            node.prev = t;
+            if (compareAndSetTail(t, node)) {
+                t.next = node;
+                return t;
+            }
+        }
+    }
 }
 ```
 
@@ -198,27 +198,27 @@ AbstractQueuedSynchronizer.acquireQueued:
 
 ```java
 final boolean acquireQueued(final Node node, int arg) {
-	boolean failed = true;
-	try {
-		boolean interrupted = false;
-		for (;;) {
-			final Node p = node.predecessor();
-          	//前一个是head，那么表示当前节点即是等待时间最长的线程，并立即尝试获得锁
-			if (p == head && tryAcquire(arg)) {
-				setHead(node);
-				p.next = null; // help GC
-				failed = false;
-				return interrupted;
-			}
-          	//执行到这里说明当前节点不是等待时间最长的节点或者锁竞争失败
-			if (shouldParkAfterFailedAcquire(p, node) &&
-				parkAndCheckInterrupt())
-				interrupted = true;
-		}
-	} finally {
-		if (failed)
-			cancelAcquire(node);
-	}
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        for (;;) {
+            final Node p = node.predecessor();
+            //前一个是head，那么表示当前节点即是等待时间最长的线程，并立即尝试获得锁
+            if (p == head && tryAcquire(arg)) {
+                setHead(node);
+                p.next = null; // help GC
+                failed = false;
+                return interrupted;
+            }
+            //执行到这里说明当前节点不是等待时间最长的节点或者锁竞争失败
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                interrupted = true;
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
 }
 ```
 
@@ -228,28 +228,28 @@ shouldParkAfterFailedAcquire方法用于检测当前线程是否应该休眠，�
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
-	int ws = pred.waitStatus;
-	if (ws == Node.SIGNAL)
-		/*
-		 * This node has already set status asking a release
-		 * to signal it, so it can safely park.
-		 */
-		return true;
-  	//上一个节点已经被取消，所以需要"跳过"前面所有已经被取消的节点
-	if (ws > 0) {
-		do {
-			node.prev = pred = pred.prev;
-		} while (pred.waitStatus > 0);
-		pred.next = node;
-	} else {
-		/*
-		 * waitStatus must be 0 or PROPAGATE.  Indicate that we
-		 * need a signal, but don't park yet.  Caller will need to
-		 * retry to make sure it cannot acquire before parking.
-		 */
-		compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
-	}
-	return false;
+    int ws = pred.waitStatus;
+    if (ws == Node.SIGNAL)
+        /*
+         * This node has already set status asking a release
+         * to signal it, so it can safely park.
+         */
+        return true;
+    //上一个节点已经被取消，所以需要"跳过"前面所有已经被取消的节点
+    if (ws > 0) {
+        do {
+            node.prev = pred = pred.prev;
+        } while (pred.waitStatus > 0);
+        pred.next = node;
+    } else {
+        /*
+         * waitStatus must be 0 or PROPAGATE.  Indicate that we
+         * need a signal, but don't park yet.  Caller will need to
+         * retry to make sure it cannot acquire before parking.
+         */
+        compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+    }
+    return false;
 }
 ```
 
@@ -259,8 +259,8 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 
 ```java
 private final boolean parkAndCheckInterrupt() {
-	LockSupport.park(this);
-	return Thread.interrupted();
+    LockSupport.park(this);
+    return Thread.interrupted();
 }
 ```
 
@@ -270,11 +270,11 @@ LockSupport.park:
 
 ```java
 public static void park(Object blocker) {
-	Thread t = Thread.currentThread();
+    Thread t = Thread.currentThread();
     setBlocker(t, blocker);
-  	//native
-	UNSAFE.park(false, 0L);
-	setBlocker(t, null);
+    //native
+    UNSAFE.park(false, 0L);
+    setBlocker(t, null);
 }
 ```
 
@@ -294,7 +294,7 @@ public static void park(Object blocker) {
 
   ```java
   while (!condition)
-  	await();
+    await();
   ```
 
   便是为了防止此问题。
@@ -309,7 +309,7 @@ AbstractQueuedSynchronizer.selfInterrupt:
 
 ```java
 static void selfInterrupt() {
-	Thread.currentThread().interrupt();
+    Thread.currentThread().interrupt();
 }
 ```
 
@@ -324,10 +324,10 @@ AbstractQueuedSynchronizer.acquireInterruptibly:
 
 ```java
 public final void acquireInterruptibly(int arg) throws InterruptedException {
-	if (Thread.interrupted())
-		throw new InterruptedException();
-	if (!tryAcquire(arg))
-		doAcquireInterruptibly(arg);
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    if (!tryAcquire(arg))
+        doAcquireInterruptibly(arg);
 }
 ```
 
@@ -337,26 +337,26 @@ AbstractQueuedSynchronizer.doAcquireInterruptibly:
 
 ```java
 private void doAcquireInterruptibly(int arg) throws InterruptedException {
-	final Node node = addWaiter(Node.EXCLUSIVE);
-	boolean failed = true;
-	try {
-		for (;;) {
-			final Node p = node.predecessor();
-			if (p == head && tryAcquire(arg)) {
-				setHead(node);
-				p.next = null; // help GC
-				failed = false;
-				return;
-			}
-			if (shouldParkAfterFailedAcquire(p, node) &&
-				parkAndCheckInterrupt())
-              	//看这里!
-				throw new InterruptedException();
-		}
-	} finally {
-		if (failed)
-			cancelAcquire(node);
-	}
+    final Node node = addWaiter(Node.EXCLUSIVE);
+    boolean failed = true;
+    try {
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head && tryAcquire(arg)) {
+                setHead(node);
+                p.next = null; // help GC
+                failed = false;
+                return;
+            }
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                //看这里!
+                throw new InterruptedException();
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
 }
 ```
 
@@ -374,9 +374,9 @@ AbstractQueuedSynchronizer.tryAcquireNanos:
 
 ```java
 public final boolean tryAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
-	if (Thread.interrupted())
-    	throw new InterruptedException();
-	return tryAcquire(arg) || doAcquireNanos(arg, nanosTimeout);
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    return tryAcquire(arg) || doAcquireNanos(arg, nanosTimeout);
 }
 ```
 
@@ -384,33 +384,33 @@ doAcquireNanos:
 
 ```java
 private boolean doAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
-	if (nanosTimeout <= 0L)
-		return false;
-	final long deadline = System.nanoTime() + nanosTimeout;
-	final Node node = addWaiter(Node.EXCLUSIVE);
-	boolean failed = true;
-	try {
-		for (;;) {
-			final Node p = node.predecessor();
-			if (p == head && tryAcquire(arg)) {
-				setHead(node);
-				p.next = null; // help GC
-				failed = false;
-				return true;
-			}
-			nanosTimeout = deadline - System.nanoTime();
-			if (nanosTimeout <= 0L)
-				return false;
-			if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold)
-              	//挂起指定的时间
-				LockSupport.parkNanos(this, nanosTimeout);
-			if (Thread.interrupted())
-				throw new InterruptedException();
-		}
-	} finally {
-		if (failed)
-			cancelAcquire(node);
-	}
+    if (nanosTimeout <= 0L)
+        return false;
+    final long deadline = System.nanoTime() + nanosTimeout;
+    final Node node = addWaiter(Node.EXCLUSIVE);
+    boolean failed = true;
+    try {
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head && tryAcquire(arg)) {
+                setHead(node);
+                p.next = null; // help GC
+                failed = false;
+                return true;
+            }
+            nanosTimeout = deadline - System.nanoTime();
+            if (nanosTimeout <= 0L)
+                return false;
+            if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold)
+                //挂起指定的时间
+                LockSupport.parkNanos(this, nanosTimeout);
+            if (Thread.interrupted())
+                throw new InterruptedException();
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
 }
 ```
 
@@ -422,13 +422,13 @@ spinForTimeoutThreshold为1000纳秒，可以看出，如果给定的等待时�
 
 ```java
 public final boolean release(int arg) {
-	if (tryRelease(arg)) {
-		Node h = head;
-		if (h != null && h.waitStatus != 0)
-			unparkSuccessor(h);
-		return true;
-	}
-	return false;
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
 }
 ```
 
@@ -438,16 +438,16 @@ Sync.tryRelease:
 
 ```java
 protected final boolean tryRelease(int releases) {
-	int c = getState() - releases;
-	if (Thread.currentThread() != getExclusiveOwnerThread())
-		throw new IllegalMonitorStateException();
-	boolean free = false;
-	if (c == 0) {
-		free = true;
-		setExclusiveOwnerThread(null);
-	}
-	setState(c);
-	return free;
+    int c = getState() - releases;
+    if (Thread.currentThread() != getExclusiveOwnerThread())
+        throw new IllegalMonitorStateException();
+    boolean free = false;
+    if (c == 0) {
+        free = true;
+        setExclusiveOwnerThread(null);
+    }
+    setState(c);
+    return free;
 }
 ```
 
@@ -461,23 +461,23 @@ unparkSuccessor:
 
 ```java
  private void unparkSuccessor(Node node) {
-	int ws = node.waitStatus;
-	if (ws < 0)
-		compareAndSetWaitStatus(node, ws, 0);
+    int ws = node.waitStatus;
+    if (ws < 0)
+        compareAndSetWaitStatus(node, ws, 0);
 
-	Node s = node.next;
-	if (s == null || s.waitStatus > 0) {
-		s = null;
-		for (Node t = tail; t != null && t != node; t = t.prev)
-			if (t.waitStatus <= 0)
-				s = t;
-	}
-	if (s != null)
-		LockSupport.unpark(s.thread);
+    Node s = node.next;
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    if (s != null)
+        LockSupport.unpark(s.thread);
 }
 ```
 
-可以看出，显示检查下一个节点(next)，如果没有被取消，那么唤醒它即可，如果已经被取消，那么将倒着从后面查找。
+可以看出，先是检查下一个节点(next)，如果没有被取消，那么唤醒它即可，如果已经被取消，那么将倒着从后面查找。
 
 ## 公平锁
 
@@ -487,7 +487,7 @@ FairSync.lock:
 
 ```java
 final void lock() {
-	acquire(1);
+    acquire(1);
 }
 ```
 
@@ -495,24 +495,24 @@ final void lock() {
 
 ```java
 protected final boolean tryAcquire(int acquires) {
-	final Thread current = Thread.currentThread();
-	int c = getState();
-	if (c == 0) {
-      	//这里
-		if (!hasQueuedPredecessors() &&
-			compareAndSetState(0, acquires)) {
-			setExclusiveOwnerThread(current);
-			return true;
-		}
-	}
-	else if (current == getExclusiveOwnerThread()) {
-		int nextc = c + acquires;
-		if (nextc < 0)
-			throw new Error("Maximum lock count exceeded");
-		setState(nextc);
-		return true;
-	}
-	return false;
+    final Thread current = Thread.currentThread();
+    int c = getState();
+    if (c == 0) {
+        //这里
+        if (!hasQueuedPredecessors() &&
+            compareAndSetState(0, acquires)) {
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0)
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    return false;
 }
 ```
 

@@ -14,7 +14,7 @@ ReentrantLock.newCondition:
 
 ```java
 public Condition newCondition() {
-	return sync.newCondition();
+    return sync.newCondition();
 }
 ```
 
@@ -22,7 +22,7 @@ Sync.newCondition:
 
 ```java
 final ConditionObject newCondition() {
-	return new ConditionObject();
+    return new ConditionObject();
 }
 ```
 
@@ -32,22 +32,22 @@ ConditionObject.await:
 
 ```java
 public final void await() throws InterruptedException {
-	if (Thread.interrupted())
-		throw new InterruptedException();
-	Node node = addConditionWaiter();
-	int savedState = fullyRelease(node);
-	int interruptMode = 0;
-	while (!isOnSyncQueue(node)) {
-		LockSupport.park(this);
-		if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
-			break;
-	}
-	if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
-		interruptMode = REINTERRUPT;
-	if (node.nextWaiter != null) // clean up if cancelled
-		unlinkCancelledWaiters();
-	if (interruptMode != 0)
-		reportInterruptAfterWait(interruptMode);
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    Node node = addConditionWaiter();
+    int savedState = fullyRelease(node);
+    int interruptMode = 0;
+    while (!isOnSyncQueue(node)) {
+        LockSupport.park(this);
+        if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+            break;
+    }
+    if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+        interruptMode = REINTERRUPT;
+    if (node.nextWaiter != null) // clean up if cancelled
+        unlinkCancelledWaiters();
+    if (interruptMode != 0)
+        reportInterruptAfterWait(interruptMode);
 }
 ```
 
@@ -57,19 +57,19 @@ addConditionWaiter用于向Lock的锁队列的条件队列添加新的等待节�
 
 ```java
 private Node addConditionWaiter() {
-	Node t = lastWaiter;
-	// If lastWaiter is cancelled, clean out.
-	if (t != null && t.waitStatus != Node.CONDITION) {
-		unlinkCancelledWaiters();
-		t = lastWaiter;
-	}
-	Node node = new Node(Thread.currentThread(), Node.CONDITION);
-	if (t == null)
-		firstWaiter = node;
-	else
-		t.nextWaiter = node;
-	lastWaiter = node;
-	return node;
+    Node t = lastWaiter;
+    // If lastWaiter is cancelled, clean out.
+    if (t != null && t.waitStatus != Node.CONDITION) {
+        unlinkCancelledWaiters();
+        t = lastWaiter;
+    }
+    Node node = new Node(Thread.currentThread(), Node.CONDITION);
+    if (t == null)
+        firstWaiter = node;
+    else
+        t.nextWaiter = node;
+    lastWaiter = node;
+    return node;
 }
 ```
 
@@ -83,19 +83,19 @@ AbstractQueuedSynchronizer.fullyRelease:
 
 ```java
 final int fullyRelease(Node node) {
-	boolean failed = true;
-	try {
-		int savedState = getState();
-		if (release(savedState)) {
-			failed = false;
-			return savedState;
-		} else {
-			throw new IllegalMonitorStateException();
-		}
-	} finally {
-		if (failed)
-			node.waitStatus = Node.CANCELLED;
-	}
+    boolean failed = true;
+    try {
+        int savedState = getState();
+        if (release(savedState)) {
+            failed = false;
+            return savedState;
+        } else {
+            throw new IllegalMonitorStateException();
+        }
+    } finally {
+        if (failed)
+            node.waitStatus = Node.CANCELLED;
+    }
 }
 ```
 
@@ -107,9 +107,9 @@ final int fullyRelease(Node node) {
 
 ```java
 while (!isOnSyncQueue(node)) {
-	LockSupport.park(this);
-	if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
-		break;
+    LockSupport.park(this);
+    if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+        break;
 }
 ```
 
@@ -117,11 +117,11 @@ isOnSyncQueue用以判断节点是否在锁队列(SyncQueue)上，源码:
 
 ```java
 final boolean isOnSyncQueue(Node node) {
-	if (node.waitStatus == Node.CONDITION || node.prev == null)
-		return false;
-	if (node.next != null) // If has successor, it must be on queue
-		return true;
-	return findNodeFromTail(node);
+    if (node.waitStatus == Node.CONDITION || node.prev == null)
+        return false;
+    if (node.next != null) // If has successor, it must be on queue
+        return true;
+    return findNodeFromTail(node);
 }
 ```
 
@@ -137,10 +137,10 @@ ConditionObject.checkInterruptWhileWaiting:
 
 ```java
 private int checkInterruptWhileWaiting(Node node) {
-  	//THROW_IE: -1，先中断
-  	//REINTERRUPT: 1，先唤醒
-	return Thread.interrupted() ?
-		(transferAfterCancelledWait(node) ? THROW_IE : REINTERRUPT) : 0;
+    //THROW_IE: -1，先中断
+    //REINTERRUPT: 1，先唤醒
+    return Thread.interrupted() ?
+        (transferAfterCancelledWait(node) ? THROW_IE : REINTERRUPT) : 0;
 }
 ```
 
@@ -148,14 +148,14 @@ AbstractQueuedSynchronizer.transferAfterCancelledWait:
 
 ```java
 final boolean transferAfterCancelledWait(Node node) {
-	if (compareAndSetWaitStatus(node, Node.CONDITION, 0)) {
-		enq(node);
-		return true;
-	}
-  	//等待signal线程完成到锁队列的转换工作
-	while (!isOnSyncQueue(node))
-		Thread.yield();
-	return false;
+    if (compareAndSetWaitStatus(node, Node.CONDITION, 0)) {
+        enq(node);
+        return true;
+    }
+    //等待signal线程完成到锁队列的转换工作
+    while (!isOnSyncQueue(node))
+        Thread.yield();
+    return false;
 }
 ```
 
@@ -171,7 +171,7 @@ final boolean transferAfterCancelledWait(Node node) {
 
 ```java
 if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
-	interruptMode = REINTERRUPT;
+    interruptMode = REINTERRUPT;
 ```
 
 从这里也可以看出保存最初的锁状态(savedState)的原因。
@@ -182,19 +182,19 @@ AbstractQueuedSynchronizer.shouldParkAfterFailedAcquire:
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
-	int ws = pred.waitStatus;
-	if (ws == Node.SIGNAL)
-		return true;
-	if (ws > 0) {
-		do {
-			node.prev = pred = pred.prev;
-		} while (pred.waitStatus > 0);
-		pred.next = node;
-	} else {
-      	//here
-		compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
-	}
-	return false;
+    int ws = pred.waitStatus;
+    if (ws == Node.SIGNAL)
+        return true;
+    if (ws > 0) {
+        do {
+            node.prev = pred = pred.prev;
+        } while (pred.waitStatus > 0);
+        pred.next = node;
+    } else {
+        //here
+        compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+    }
+    return false;
 }
 ```
 
@@ -208,23 +208,23 @@ ConditionObject.unlinkCancelledWaiters:
 
 ```java
 private void unlinkCancelledWaiters() {
-	Node t = firstWaiter;
-	Node trail = null;
-	while (t != null) {
-		Node next = t.nextWaiter;
-		if (t.waitStatus != Node.CONDITION) {
-			t.nextWaiter = null;
-			if (trail == null)
-				firstWaiter = next;
-			else
-				trail.nextWaiter = next;
-			if (next == null)
-				lastWaiter = trail;
-		}
-		else
-			trail = t;
-		t = next;
-	}
+    Node t = firstWaiter;
+    Node trail = null;
+    while (t != null) {
+        Node next = t.nextWaiter;
+        if (t.waitStatus != Node.CONDITION) {
+            t.nextWaiter = null;
+            if (trail == null)
+                firstWaiter = next;
+            else
+                trail.nextWaiter = next;
+            if (next == null)
+                lastWaiter = trail;
+        }
+        else
+            trail = t;
+        t = next;
+    }
 }
 ```
 
@@ -236,11 +236,11 @@ ConditionObject.reportInterruptAfterWait:
 
 ```java
 private void reportInterruptAfterWait(int interruptMode) throws InterruptedException {
-	if (interruptMode == THROW_IE)
-    	throw new InterruptedException();
-	else if (interruptMode == REINTERRUPT)
-      	//重新设置中断标志位
-		selfInterrupt();
+    if (interruptMode == THROW_IE)
+        throw new InterruptedException();
+    else if (interruptMode == REINTERRUPT)
+        //重新设置中断标志位
+        selfInterrupt();
 }
 ```
 
@@ -250,12 +250,12 @@ ConditionObject.signalAll:
 
 ```java
 public final void signalAll() {
-  	//检查当前线程是不是拥有锁
-	if (!isHeldExclusively())
-		throw new IllegalMonitorStateException();
-	Node first = firstWaiter;
-	if (first != null)
-		doSignalAll(first);
+    //检查当前线程是不是拥有锁
+    if (!isHeldExclusively())
+        throw new IllegalMonitorStateException();
+    Node first = firstWaiter;
+    if (first != null)
+        doSignalAll(first);
 }
 ```
 
@@ -263,13 +263,13 @@ doSignalAll:
 
 ```java
 private void doSignalAll(Node first) {
-	lastWaiter = firstWaiter = null;
-	do {
-		Node next = first.nextWaiter;
-		first.nextWaiter = null;
-		transferForSignal(first);
-		first = next;
-	} while (first != null);
+    lastWaiter = firstWaiter = null;
+    do {
+        Node next = first.nextWaiter;
+        first.nextWaiter = null;
+        transferForSignal(first);
+        first = next;
+    } while (first != null);
 }
 ```
 
@@ -281,14 +281,14 @@ AbstractQueuedSynchronizer.transferForSignal:
 
 ```java
 final boolean transferForSignal(Node node) {
-	if (!compareAndSetWaitStatus(node, Node.CONDITION, 0))
-		return false;
-	Node p = enq(node);
-  	int ws = p.waitStatus;
-  	//将状态设为SIGNAL
-	if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
-		LockSupport.unpark(node.thread);
-	return true;
+    if (!compareAndSetWaitStatus(node, Node.CONDITION, 0))
+        return false;
+    Node p = enq(node);
+    int ws = p.waitStatus;
+    //将状态设为SIGNAL
+    if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
+        LockSupport.unpark(node.thread);
+    return true;
 }
 ```
 
@@ -300,9 +300,9 @@ final boolean transferForSignal(Node node) {
 
 ```java
 while (!isOnSyncQueue(node)) {
-	LockSupport.park(this);
-	if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
-		break;
+    LockSupport.park(this);
+    if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+        break;
 }
 ```
 

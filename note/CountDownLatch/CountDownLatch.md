@@ -12,7 +12,7 @@ CountDownLatch.await:
 
 ```java
 public void await() throws InterruptedException {
-	sync.acquireSharedInterruptibly(1);
+    sync.acquireSharedInterruptibly(1);
 }
 ```
 
@@ -20,9 +20,9 @@ AbstractQueuedSynchronizer.acquireSharedInterruptibly:
 
 ```java
 public final void acquireSharedInterruptibly(int arg) throws InterruptedException {
-	if (Thread.interrupted()) throw new InterruptedException();
-	if (tryAcquireShared(arg) < 0)
-		doAcquireSharedInterruptibly(arg);
+    if (Thread.interrupted()) throw new InterruptedException();
+    if (tryAcquireShared(arg) < 0)
+        doAcquireSharedInterruptibly(arg);
 }
 ```
 
@@ -30,7 +30,7 @@ public final void acquireSharedInterruptibly(int arg) throws InterruptedExceptio
 
 ```java
 protected int tryAcquireShared(int acquires) {
-	return (getState() == 0) ? 1 : -1;
+    return (getState() == 0) ? 1 : -1;
 }
 ```
 
@@ -40,7 +40,7 @@ protected int tryAcquireShared(int acquires) {
 
 ```java
 public void countDown() {
-	sync.releaseShared(1);
+    sync.releaseShared(1);
 }
 ```
 
@@ -48,11 +48,11 @@ AbstractQueuedSynchronizer.releaseShared:
 
 ```java
 public final boolean releaseShared(int arg) {
-	if (tryReleaseShared(arg)) {
-    	doReleaseShared();
-		return true;
-	}
-	return false;
+    if (tryReleaseShared(arg)) {
+        doReleaseShared();
+        return true;
+    }
+    return false;
 }
 ```
 
@@ -60,15 +60,15 @@ public final boolean releaseShared(int arg) {
 
 ```java
 protected boolean tryReleaseShared(int releases) {
-	// Decrement count; signal when transition to zero
-	for (;;) {
-    	int c = getState();
-    	if (c == 0)
-      		return false;
-    	int nextc = c-1;
-    	if (compareAndSetState(c, nextc))
-      		return nextc == 0;
-  	}
+    // Decrement count; signal when transition to zero
+    for (;;) {
+        int c = getState();
+        if (c == 0)
+            return false;
+        int nextc = c-1;
+        if (compareAndSetState(c, nextc))
+            return nextc == 0;
+    }
 }
 ```
 
@@ -78,7 +78,7 @@ protected boolean tryReleaseShared(int releases) {
 
 ```java
 public CountDownLatch(int count) {
-	this.sync = new Sync(count);
+    this.sync = new Sync(count);
 }
 ```
 
@@ -86,7 +86,7 @@ Sync构造器:
 
 ```java
 Sync(int count) {
-	setState(count);
+    setState(count);
 }
 ```
 
