@@ -13,7 +13,7 @@
 <XPD:OBJ name="OwnedElements[0]" type="UMLModel" guid="kailyBPKekuUixQ3X4Ac0wAA">
 <XPD:ATTR name="Name" type="string">classes</XPD:ATTR>
 <XPD:REF name="Namespace">OgMvQ//nPEa3ihAvljlC+wAA</XPD:REF>
-<XPD:ATTR name="#OwnedDiagrams" type="integer">1</XPD:ATTR>
+<XPD:ATTR name="#OwnedDiagrams" type="integer">2</XPD:ATTR>
 <XPD:OBJ name="OwnedDiagrams[0]" type="UMLClassDiagram" guid="/e3GRMridkSx10/d+pVdCQAA">
 <XPD:ATTR name="Name" type="string">Class</XPD:ATTR>
 <XPD:REF name="DiagramOwner">kailyBPKekuUixQ3X4Ac0wAA</XPD:REF>
@@ -218,7 +218,46 @@
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
-<XPD:ATTR name="#OwnedElements" type="integer">7</XPD:ATTR>
+<XPD:OBJ name="OwnedDiagrams[1]" type="UMLClassDiagram" guid="91FgC6xBOk6NrkAYsWCvygAA">
+<XPD:ATTR name="Name" type="string">ReflectionData</XPD:ATTR>
+<XPD:REF name="DiagramOwner">kailyBPKekuUixQ3X4Ac0wAA</XPD:REF>
+<XPD:OBJ name="DiagramView" type="UMLClassDiagramView" guid="h+pZ0KbweUeXV6wZz1yCsgAA">
+<XPD:REF name="Diagram">91FgC6xBOk6NrkAYsWCvygAA</XPD:REF>
+<XPD:ATTR name="#OwnedViews" type="integer">1</XPD:ATTR>
+<XPD:OBJ name="OwnedViews[0]" type="UMLClassView" guid="dOioqLAPyUKIQ41JBrhhawAA">
+<XPD:ATTR name="LineColor" type="string">clMaroon</XPD:ATTR>
+<XPD:ATTR name="FillColor" type="string">$00B9FFFF</XPD:ATTR>
+<XPD:ATTR name="Left" type="integer">320</XPD:ATTR>
+<XPD:ATTR name="Top" type="integer">88</XPD:ATTR>
+<XPD:ATTR name="Width" type="integer">148</XPD:ATTR>
+<XPD:ATTR name="Height" type="integer">69</XPD:ATTR>
+<XPD:REF name="Model">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+<XPD:OBJ name="NameCompartment" type="UMLNameCompartmentView" guid="cMVbYc+RIUe1ej5EIYKrbwAA">
+<XPD:OBJ name="NameLabel" type="LabelView" guid="CYeSPGOPdkOHrfDcCxZgTAAA">
+<XPD:ATTR name="FontStyle" type="integer">1</XPD:ATTR>
+<XPD:ATTR name="Text" type="string">ReflectionData</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="StereotypeLabel" type="LabelView" guid="eaNpPCzDuEG2OmneU/wakQAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="PropertyLabel" type="LabelView" guid="raZtcRMMh0WnGvFhRAFnvwAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:OBJ name="AttributeCompartment" type="UMLAttributeCompartmentView" guid="1T+I3YDOiUavNlfNCxsOhgAA">
+<XPD:REF name="Model">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OperationCompartment" type="UMLOperationCompartmentView" guid="hjv0YGumCkG+ZYibjna5YQAA">
+<XPD:REF name="Model">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="TemplateParameterCompartment" type="UMLTemplateParameterCompartmentView" guid="JNaewO1y2Ee6W7T0eH/qLgAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+<XPD:REF name="Model">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:ATTR name="#OwnedElements" type="integer">8</XPD:ATTR>
 <XPD:OBJ name="OwnedElements[0]" type="UMLInterface" guid="EjXqGPk9REiBDT5eizwq/AAA">
 <XPD:ATTR name="Name" type="string">AnnotatedElement</XPD:ATTR>
 <XPD:REF name="Namespace">kailyBPKekuUixQ3X4Ac0wAA</XPD:REF>
@@ -330,6 +369,26 @@
 <XPD:REF name="Views[1]">ifaZvfprtUuPD+Q8V6+x1AAA</XPD:REF>
 <XPD:REF name="Views[2]">UxWkkEXHA02vaKrNmWg9EgAA</XPD:REF>
 <XPD:REF name="Views[3]">H3JoXI7xfUi2Pc5G63vjBAAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OwnedElements[7]" type="UMLClass" guid="ph/mQc5fgUa/HumhAnmm3QAA">
+<XPD:ATTR name="Name" type="string">ReflectionData</XPD:ATTR>
+<XPD:REF name="Namespace">kailyBPKekuUixQ3X4Ac0wAA</XPD:REF>
+<XPD:ATTR name="#Views" type="integer">4</XPD:ATTR>
+<XPD:REF name="Views[0]">dOioqLAPyUKIQ41JBrhhawAA</XPD:REF>
+<XPD:REF name="Views[1]">1T+I3YDOiUavNlfNCxsOhgAA</XPD:REF>
+<XPD:REF name="Views[2]">hjv0YGumCkG+ZYibjna5YQAA</XPD:REF>
+<XPD:REF name="Views[3]">JNaewO1y2Ee6W7T0eH/qLgAA</XPD:REF>
+<XPD:ATTR name="#Attributes" type="integer">2</XPD:ATTR>
+<XPD:OBJ name="Attributes[0]" type="UMLAttribute" guid="x7LE0cmMaUmWCNxCpPnR0AAA">
+<XPD:ATTR name="Name" type="string">volatile Field declaredFields</XPD:ATTR>
+<XPD:ATTR name="Visibility" type="UMLVisibilityKind">vkPackage</XPD:ATTR>
+<XPD:REF name="Owner">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="Attributes[1]" type="UMLAttribute" guid="81e3dYP9Q0mGMuskBff70AAA">
+<XPD:ATTR name="Name" type="string">volatile Field publicFields</XPD:ATTR>
+<XPD:ATTR name="Visibility" type="UMLVisibilityKind">vkPackage</XPD:ATTR>
+<XPD:REF name="Owner">ph/mQc5fgUa/HumhAnmm3QAA</XPD:REF>
+</XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
