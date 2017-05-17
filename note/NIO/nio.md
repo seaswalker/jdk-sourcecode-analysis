@@ -1091,6 +1091,99 @@ accept0为native方法，可以看出，其负责设置了新的文件描述符�
 
 Linux connect系统调用。
 
+## socket
+
+此方法用于获取通道对应的Socket对象，为什么要特别说明这个方法呢?这是因为想到了一个很有意思的情景:
+
+如果我们将通道设置为非阻塞模式，而又创建 一个BufferedOutputStream进行输出，正如以下代码所示:
+
+```java
+new BufferedOutputStream(channel.socket().getOutputStream());
+```
+
+众所周知BufferedOutputStream一般是用在阻塞场景下，那么当阻塞遇见非阻塞会发生什么呢?
+
+SocketChannelImpl.socket:
+
+```java
+public Socket socket() {
+    synchronized (stateLock) {
+        if (socket == null)
+            socket = SocketAdaptor.create(this);
+        return socket;
+    }
+}
+```
+
+SocketAdaptor.create方法实际上创建了一个SocketAdaptor对象，SocketAdaptor位于sun.nio.ch包下，是Socket的子类，这货和我们在Socket部分提到的真正的实现类有什么区别呢?来看一看此类的注释说明:
+
+> Make a socket channel look like a socket.
+>
+> Otherwise an adapter socket should look enough like a real java.net.Socket to fool most of the
+> developers most of the time.
+
+尼玛，这货是将一个通道弄得看起来像一个真的Socket，WTF!
+
+getOutputStream方法由Channels.newOutputStream实现，而Channels类是一个nio相关的工具类，提供字节流、字符流和通道之间的相互转换，类图:
+
+![Channels](images/Channels.jpg)
+
+newOutputStream方法实现:
+
+```java
+public static OutputStream newOutputStream(final WritableByteChannel ch) {
+
+    return new OutputStream() {
+        private ByteBuffer bb = null;
+        private byte[] bs = null;       // Invoker's previous array
+        private byte[] b1 = null;
+        public synchronized void write(int b) throws IOException {
+           if (b1 == null)
+                b1 = new byte[1];
+            b1[0] = (byte)b;
+            this.write(b1);
+        }
+        public synchronized void write(byte[] bs, int off, int len)
+            throws IOException {
+            if ((off < 0) || (off > bs.length) || (len < 0) ||
+                ((off + len) > bs.length) || ((off + len) < 0)) {
+                throw new IndexOutOfBoundsException();
+            } else if (len == 0) {
+                return;
+            }
+            ByteBuffer bb = ((this.bs == bs) ? this.bb : ByteBuffer.wrap(bs));
+            bb.limit(Math.min(off + len, bb.capacity()));
+            bb.position(off);
+            this.bb = bb;
+            this.bs = bs;
+            Channels.writeFully(ch, bb);
+        }
+        public void close() throws IOException {
+            ch.close();
+        }
+    };
+}
+```
+
+可以看出，返回的其实是一个OutputStream的匿名子类，核心位于writeFully方法:
+
+```java
+private static void writeFully(WritableByteChannel ch, ByteBuffer bb) {
+    if (ch instanceof SelectableChannel) {
+        SelectableChannel sc = (SelectableChannel)ch;
+        synchronized (sc.blockingLock()) {
+            if (!sc.isBlocking())
+                throw new IllegalBlockingModeException();
+            writeFullyImpl(ch, bb);
+        }
+    } else {
+        writeFullyImpl(ch, bb);
+    }
+}
+```
+
+关键就在于条件判断`if (!sc.isBlocking())`，也就是说，如果给定的通道处于非阻塞模式，那么直接抛出异常，这就很好的印证了流"阻塞"的语义，其实这里在做的就是用通道模仿出流的行为。
+
 ## 关闭
 
 SocketChannel和FileChannel一样都是AbstractInterruptibleChannel的子类，所以close方法的实现是一样的:

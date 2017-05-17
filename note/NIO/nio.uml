@@ -13,7 +13,7 @@
 <XPD:OBJ name="OwnedElements[0]" type="UMLModel" guid="qUSpskDcW06POJkh7tQrsgAA">
 <XPD:ATTR name="Name" type="string">classes</XPD:ATTR>
 <XPD:REF name="Namespace">LKDhb1+Sz0ObEoweTDKpbAAA</XPD:REF>
-<XPD:ATTR name="#OwnedDiagrams" type="integer">4</XPD:ATTR>
+<XPD:ATTR name="#OwnedDiagrams" type="integer">5</XPD:ATTR>
 <XPD:OBJ name="OwnedDiagrams[0]" type="UMLClassDiagram" guid="mx2k1UrgkkyLOhHX17gykAAA">
 <XPD:ATTR name="Name" type="string">Selector</XPD:ATTR>
 <XPD:REF name="DiagramOwner">qUSpskDcW06POJkh7tQrsgAA</XPD:REF>
@@ -845,7 +845,46 @@
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
-<XPD:ATTR name="#OwnedElements" type="integer">28</XPD:ATTR>
+<XPD:OBJ name="OwnedDiagrams[4]" type="UMLClassDiagram" guid="wj+fmin86ES8dd5ZOvT4+wAA">
+<XPD:ATTR name="Name" type="string">Channels</XPD:ATTR>
+<XPD:REF name="DiagramOwner">qUSpskDcW06POJkh7tQrsgAA</XPD:REF>
+<XPD:OBJ name="DiagramView" type="UMLClassDiagramView" guid="kI9bHGEyR0GpYiPH3cCtDwAA">
+<XPD:REF name="Diagram">wj+fmin86ES8dd5ZOvT4+wAA</XPD:REF>
+<XPD:ATTR name="#OwnedViews" type="integer">1</XPD:ATTR>
+<XPD:OBJ name="OwnedViews[0]" type="UMLClassView" guid="o2W9Zqes0EGHxTvmk/ZGFAAA">
+<XPD:ATTR name="LineColor" type="string">clMaroon</XPD:ATTR>
+<XPD:ATTR name="FillColor" type="string">$00B9FFFF</XPD:ATTR>
+<XPD:ATTR name="Left" type="integer">276</XPD:ATTR>
+<XPD:ATTR name="Top" type="integer">84</XPD:ATTR>
+<XPD:ATTR name="Width" type="integer">335</XPD:ATTR>
+<XPD:ATTR name="Height" type="integer">82</XPD:ATTR>
+<XPD:REF name="Model">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+<XPD:OBJ name="NameCompartment" type="UMLNameCompartmentView" guid="ObIJ25XioU2EmJ7iLT/e6gAA">
+<XPD:OBJ name="NameLabel" type="LabelView" guid="6acPbVf2AECXzbuC3SWugQAA">
+<XPD:ATTR name="FontStyle" type="integer">1</XPD:ATTR>
+<XPD:ATTR name="Text" type="string">Channels</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="StereotypeLabel" type="LabelView" guid="LQszheaTFk+12N06Vm1GGgAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+<XPD:OBJ name="PropertyLabel" type="LabelView" guid="p565R0bc6k6qaDjpHTZyWwAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:OBJ name="AttributeCompartment" type="UMLAttributeCompartmentView" guid="AhTJFxkgOUWT4glqpjEEVgAA">
+<XPD:REF name="Model">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OperationCompartment" type="UMLOperationCompartmentView" guid="SFYA2h+H3kWRI7gqlESCSQAA">
+<XPD:REF name="Model">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="TemplateParameterCompartment" type="UMLTemplateParameterCompartmentView" guid="5BebyX5mQEabSYku+h2L6QAA">
+<XPD:ATTR name="Visible" type="boolean">False</XPD:ATTR>
+<XPD:REF name="Model">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:ATTR name="#OwnedElements" type="integer">29</XPD:ATTR>
 <XPD:OBJ name="OwnedElements[0]" type="UMLInterface" guid="IJdhR2LKQE6XoQiNMLZiyAAA">
 <XPD:ATTR name="Name" type="string">AutoCloseable</XPD:ATTR>
 <XPD:REF name="Namespace">qUSpskDcW06POJkh7tQrsgAA</XPD:REF>
@@ -1484,6 +1523,50 @@
 <XPD:REF name="Views[1]">sfoNp1uuG0+HUKABq8YTGgAA</XPD:REF>
 <XPD:REF name="Views[2]">5eRUcKN7sU+IOxmQuH9QMAAA</XPD:REF>
 <XPD:REF name="Views[3]">haypGpgCaEO0DS/HPN2QSQAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="OwnedElements[28]" type="UMLClass" guid="2Zrv/kQzF0uHGOvdHLJ1lAAA">
+<XPD:ATTR name="Name" type="string">Channels</XPD:ATTR>
+<XPD:REF name="Namespace">qUSpskDcW06POJkh7tQrsgAA</XPD:REF>
+<XPD:ATTR name="#Views" type="integer">4</XPD:ATTR>
+<XPD:REF name="Views[0]">o2W9Zqes0EGHxTvmk/ZGFAAA</XPD:REF>
+<XPD:REF name="Views[1]">AhTJFxkgOUWT4glqpjEEVgAA</XPD:REF>
+<XPD:REF name="Views[2]">SFYA2h+H3kWRI7gqlESCSQAA</XPD:REF>
+<XPD:REF name="Views[3]">5BebyX5mQEabSYku+h2L6QAA</XPD:REF>
+<XPD:ATTR name="#Operations" type="integer">3</XPD:ATTR>
+<XPD:OBJ name="Operations[0]" type="UMLOperation" guid="1TJqJSYlGk6QW3IEDVTiTgAA">
+<XPD:ATTR name="Name" type="string">ReadableByteChannel newChannel</XPD:ATTR>
+<XPD:ATTR name="OwnerScope" type="UMLScopeKind">skClassifier</XPD:ATTR>
+<XPD:REF name="Owner">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+<XPD:ATTR name="#Parameters" type="integer">1</XPD:ATTR>
+<XPD:OBJ name="Parameters[0]" type="UMLParameter" guid="f+tuXCUOn0Wr6a32If59JQAA">
+<XPD:ATTR name="Name" type="string">final InputStream in</XPD:ATTR>
+<XPD:REF name="BehavioralFeature">1TJqJSYlGk6QW3IEDVTiTgAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:OBJ name="Operations[1]" type="UMLOperation" guid="RsOwZD/VqUS/SNPk+7d2AwAA">
+<XPD:ATTR name="Name" type="string">InputStream newInputStream</XPD:ATTR>
+<XPD:ATTR name="OwnerScope" type="UMLScopeKind">skClassifier</XPD:ATTR>
+<XPD:REF name="Owner">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+<XPD:ATTR name="#Parameters" type="integer">1</XPD:ATTR>
+<XPD:OBJ name="Parameters[0]" type="UMLParameter" guid="TTtmmddG/U+PAY3ay7/hRwAA">
+<XPD:ATTR name="Name" type="string">final AsynchronousByteChannel ch</XPD:ATTR>
+<XPD:REF name="BehavioralFeature">RsOwZD/VqUS/SNPk+7d2AwAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
+<XPD:OBJ name="Operations[2]" type="UMLOperation" guid="J+6Ue4aOUkeCUuXz2uZB6wAA">
+<XPD:ATTR name="Name" type="string">Reader newReader</XPD:ATTR>
+<XPD:ATTR name="OwnerScope" type="UMLScopeKind">skClassifier</XPD:ATTR>
+<XPD:REF name="Owner">2Zrv/kQzF0uHGOvdHLJ1lAAA</XPD:REF>
+<XPD:ATTR name="#Parameters" type="integer">2</XPD:ATTR>
+<XPD:OBJ name="Parameters[0]" type="UMLParameter" guid="oz238nVVTUePa2zmPiN4agAA">
+<XPD:ATTR name="Name" type="string">ReadableByteChannel ch</XPD:ATTR>
+<XPD:REF name="BehavioralFeature">J+6Ue4aOUkeCUuXz2uZB6wAA</XPD:REF>
+</XPD:OBJ>
+<XPD:OBJ name="Parameters[1]" type="UMLParameter" guid="leT8VagUKkufbYW6YiUj3AAA">
+<XPD:ATTR name="Name" type="string">String csName</XPD:ATTR>
+<XPD:REF name="BehavioralFeature">J+6Ue4aOUkeCUuXz2uZB6wAA</XPD:REF>
+</XPD:OBJ>
+</XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>
 </XPD:OBJ>

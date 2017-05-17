@@ -55,3 +55,20 @@ p = (p != t && t != (t = tail)) ? t : q;
 ```
 
 那么为什么不能每插入一个节点便更新一次tail指针呢，因为出于降低CAS线程竞争(空转)的考虑。
+
+# 结尾
+
+此类不再向下继续展开，直接参考"Java并发编程实战"一书的272页内容即可，书中对其使用的算法进行了一针见血的说明。
+
+# 问题
+
+在debug的过程中发现了一个非常奇怪的问题，所以提出了知乎上的这个问题:
+
+[Java ConcurrentLinkedQueue疑问?](https://www.zhihu.com/question/59241701)
+
+但是没有得到回答，在Stack Overflow上也有一个同样的问题:
+
+[What exactly UNSAFE.compareAndSwapObject does?](https://link.zhihu.com/?target=http%3A//stackoverflow.com/questions/22076083/what-exactly-unsafe-compareandswapobject-does)
+
+但是同样没有回答。
+
