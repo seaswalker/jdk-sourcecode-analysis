@@ -28,8 +28,6 @@ public ScheduledThreadPoolExecutor(int corePoolSize) {
 
 ![DelayedWorkQueue](images/DelayedWorkQueue.jpg)
 
-s
-
 # 单次调度
 
 ```java
@@ -60,5 +58,31 @@ Callable任务被包装成了ScheduledFutureTask对象，其是ScheduledThreadPo
 
 ![ScheduledFutureTask](images/ScheduledFutureTask.jpg)
 
-decorateTask是一个模板 方法，空实现。
+decorateTask是一个模板方法，空实现。
+
+## 调度
+
+核心便是delayedExecute方法:
+
+```java
+private void delayedExecute(RunnableScheduledFuture<?> task) {
+    if (isShutdown())
+        reject(task);
+    else {
+        super.getQueue().add(task);
+        if (isShutdown() &&
+            !canRunInCurrentRunState(task.isPeriodic()) &&
+            remove(task))
+            task.cancel(false);
+        else
+            ensurePrestart();
+    }
+}
+```
+
+isShutdown方法在父类ThreadPoolExecutor中实现，利用的便是我们已经提到过的状态记录的方法。
+
+### 工作队列
+
+DelayedWorkQueue的类图位于上面创建一节中，其实此队列便是调度实现的核心，此队列实际上用数组实现了一个小顶堆，
 
