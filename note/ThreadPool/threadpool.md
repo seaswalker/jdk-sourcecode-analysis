@@ -882,6 +882,12 @@ void interruptIfStarted() {
 
 `getState() >= 0`表示当前Worker已启动。没有获取锁直接中断，这便是和shutdown的区别了。drainQueue其实是对BlockingQueue接口drainTo方法的调用，因为线程池的队列必须是一个BlockingQueue。
 
+这里有一个很有意思的细节: 
+
+如果我们submit的任务尚未被执行，shutdownNow就被调用了，同时有一个线程正在阻塞在future上，那么此线程会被唤醒吗?
+
+答案是不会，源码中没有看到相关唤醒的代码，测试方法test.Test.canWakeUp可以证明这一现象。
+
 # getActiveCount
 
 此方法用以获取线程池中当前正在执行任务的线程数，其实现很有趣:

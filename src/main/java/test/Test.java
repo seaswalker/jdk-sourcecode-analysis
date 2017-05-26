@@ -71,4 +71,20 @@ public class Test {
         }
     }
 
+    /**
+     * 如果我们向线程池submit的任务尚未被执行，同时有线程阻塞在{@link FutureTask#get()}方法上，那么当
+     * {@link ThreadPoolExecutor#shutdownNow()}方法调用时，阻塞的线程会被唤醒吗?
+     * <p>答案是不能.</p>
+     */
+    @org.junit.Test
+    public void canWakeUp() throws InterruptedException, ExecutionException {
+        ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+        executor.execute(new StupidTask(1));
+        Future<String> future = executor.submit(() -> "hello");
+        Thread.sleep(3000);
+        executor.shutdownNow();
+        future.get();
+        System.out.println("被唤醒");
+    }
+
 }
