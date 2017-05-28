@@ -384,6 +384,28 @@ FutureTask.runAndReset方法便是调用任务逻辑的地方，不同于我们�
 
 # shutdown
 
+主要逻辑由父类ThreadPoolExecutor实现，唯一的区别便在于ScheduledThreadPoolExecutor实现了父类的模板方法onShutdown(简略版源码):
+
+```java
+@Override void onShutdown() {
+    BlockingQueue<Runnable> q = super.getQueue();
+    boolean keepDelayed = getExecuteExistingDelayedTasksAfterShutdownPolicy();
+    boolean keepPeriodic = getContinueExistingPeriodicTasksAfterShutdownPolicy();
+    if (!keepDelayed && !keepPeriodic) {
+        for (Object e : q.toArray())
+            if (e instanceof RunnableScheduledFuture<?>)
+                ((RunnableScheduledFuture<?>) e).cancel(false);
+        q.clear();
+    }
+}
+```
+
+这里所做的就是将堆中所有未执行的任务取消，所以如果有线程阻塞在等待任务的结果上最终可以返回。
+
+# shutdownNow
+
+直接调用父类的方法实现，可以想象，这便会导致线程池已关闭但`Future.get`无法返回。
+
 
 
 
