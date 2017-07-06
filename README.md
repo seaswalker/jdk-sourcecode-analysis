@@ -48,3 +48,5 @@ JDK源码阅读笔记
 [ScheduledThreadPool](https://github.com/seaswalker/JDK/blob/master/note/ScheduledThreadPool/scheduledthreadpool.md)
 
 [AsynchronousFileChannel](https://github.com/seaswalker/JDK/blob/master/note/AsynchronousFileChannel/asynchronousfilechannel.md)
+
+[BufferedInputStream](https://github.com/seaswalker/JDK/blob/master/note/BufferedInputStream/bufferedinputstream.md)
