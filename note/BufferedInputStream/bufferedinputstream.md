@@ -141,3 +141,62 @@ ioctlsocket函数为系统调用，可用于设置或读取socket相关信息，
 
 >Use to determine the amount of data pending in the network's input buffer that can be read from sockets. The argp parameter points to an unsigned long value in which ioctlsocket stores the result. FIONREAD returns the amount of data that can be read in a single call to the recv function, which may not be the same as the total amount of data queued on the socket. If s is message oriented (for example, type SOCK_DGRAM), FIONREAD still returns the amount of pending data in the network buffer, however, the amount that can actually be read in a single call to the recv function is limited to the data size written in the send or sendto function call.
 
+# skip
+
+```java
+public synchronized long skip(long n) throws IOException {
+    getBufIfOpen(); // Check for closed stream
+    if (n <= 0) {
+        return 0;
+    }
+    long avail = count - pos;
+    if (avail <= 0) {
+        // If no mark position set then don't keep in buffer
+        if (markpos <0)
+            return getInIfOpen().skip(n);
+        // Fill in buffer to save bytes for reset
+        fill();
+        avail = count - pos;
+        if (avail <= 0)
+            return 0;
+    }
+    long skipped = (avail < n) ? avail : n;
+    pos += skipped;
+    return skipped;
+}
+```
+
+逻辑一目了然，不过注意下面这一行:
+
+```java
+return getInIfOpen().skip(n);
+```
+
+这里调用的是父类InputStream的同名方法，其实现非常简单粗暴: 直接读出需要跳过的数目的字节就好了。但是可以想象，对于文件输入流一定不是这样的实现，FileInputStream的源码证明了这一点:
+
+```java
+public native long skip(long n) throws IOException;
+```
+
+因为文件支持文件指针，直接移动文件指针便可以达到跳过字节的效果。
+
+# close
+
+```java
+public void close() throws IOException {
+    byte[] buffer;
+    while ( (buffer = buf) != null) {
+        if (bufUpdater.compareAndSet(this, buffer, null)) {
+            InputStream input = in;
+            in = null;
+            if (input != null)
+                input.close();
+            return;
+        }
+        // Else retry in case a new buf was CASed in fill()
+    }
+}
+```
+
+无锁情况下的CAS重试。
+
