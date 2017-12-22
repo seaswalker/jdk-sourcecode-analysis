@@ -1,6 +1,3 @@
-# JDK
-JDK源码阅读笔记 
-
 # 传送门
 
 [Condition](https://github.com/seaswalker/JDK/blob/master/note/Condition/Condition.md)
