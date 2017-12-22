@@ -227,3 +227,11 @@ static final class SuppliedThreadLocal<T> extends ThreadLocal<T> {
 ```
 
 一目了然。
+
+# 内存泄漏
+
+以下两篇博客足矣: 
+
+[深入分析 ThreadLocal 内存泄漏问题](http://www.importnew.com/22039.html)
+
+[ThreadLocal 内存泄露的实例分析](http://www.importnew.com/22046.html)

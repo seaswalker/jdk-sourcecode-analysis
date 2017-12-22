@@ -495,7 +495,7 @@ if (!shared && !writable)
 
 ## FileLockTable
 
-如上文所述，**文件锁的作用域为整个虚拟机**，也就是死说，两个channel如果对同一个文件的重复区域进行加锁，势必会导致OverlappingFileLockException，那么Java是如何在整个虚拟机范围(全局)进行检查的呢?答案便是FileLockTable。
+如上文所述，**文件锁的作用域为整个虚拟机**，也就是说，两个channel如果对同一个文件的重复区域进行加锁，势必会导致OverlappingFileLockException，那么Java是如何在整个虚拟机范围(全局)进行检查的呢?答案便是FileLockTable。
 
 其位于sun.nio.ch下，类图:
 
