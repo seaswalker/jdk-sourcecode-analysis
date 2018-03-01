@@ -235,3 +235,95 @@ static final class SuppliedThreadLocal<T> extends ThreadLocal<T> {
 [深入分析 ThreadLocal 内存泄漏问题](http://www.importnew.com/22039.html)
 
 [ThreadLocal 内存泄露的实例分析](http://www.importnew.com/22046.html)
+
+# 继承性问题
+
+子线程中是否可以获得父线程设置的ThreadLocal变量? 答案是不可以，如以下测试代码:
+
+```java
+public class Test {
+
+    private ThreadLocal<String> threadLocal = new InheritableThreadLocal<>();
+
+    public void test() throws InterruptedException {
+        threadLocal.set("parent");
+
+        Thread thread = new Thread(() -> {
+            System.out.println(threadLocal.get());
+            threadLocal.set("child");
+            System.out.println(threadLocal.get());
+        });
+
+        thread.start();
+
+        thread.join();
+
+        System.out.println(threadLocal.get());
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        new Test().test();
+    }
+
+}
+```
+
+执行结果是:
+
+```plaintext
+null
+child
+parent
+```
+
+从中可以得出两个结论:
+
+- 子线程无法获得父线程设置的ThreadLocal。
+- 父子线程的ThreadLocal是相互独立的。
+
+解决方法是使用java.lang.InheritableThreadLocal类。原因其实很容易理解: **ThreadLocal数据以线程为单位进行保存**，**InheritableThreadLocal的原理是在子线程创建的时候
+将父线程的变量(浅)拷贝到自身中**。
+
+从源码的角度进行原理的说明，Thread中其实有两个ThreadLocalMap：
+
+```java
+ThreadLocal.ThreadLocalMap threadLocals = null;
+ThreadLocal.ThreadLocalMap inheritableThreadLocals = null;
+```
+
+**普通的ThreadLocal被保存在threadLocals中，InheritableThreadLocal被保存在inheritableThreadLocal中**，注意这里是并列的关系，即两者可以同时存在且不为空。另外一个关键的问题便是
+父线程的变量是何时被复制到子线程中的，答案是在子线程创建时，init方法:
+
+```java
+private void init(ThreadGroup g, Runnable target, String name,
+                  long stackSize, AccessControlContext acc, boolean inheritThreadLocals) {
+    if (inheritThreadLocals && parent.inheritableThreadLocals != null)
+            this.inheritableThreadLocals =
+                ThreadLocal.createInheritedMap(parent.inheritableThreadLocals);
+}
+```
+
+inheritThreadLocals除非我们使用了带AccessControlContext参数的构造器，默认都是true。
+
+然而到了这里仍有问题存在：那就是线程池场景。一个线程**只会在创建时从其父线程中拷贝一次属性**，而线程池中的线程需要动态地执行从不同的上级线程提交地任务，在此种情形下逻辑上的
+父线程也就不再存在了，阿里巴巴的[transmittable-thread-local](https://github.com/alibaba/transmittable-thread-local)解决了这一问题，核心原理其实是实现了一个Runnable的包装，
+伪代码如下:
+
+```java
+public class Wrapper implements Runnable {
+
+    private final Runnable target;
+    
+    @Override
+    public final void run() {
+        //1.拷贝父变量
+        try {
+            target.run();
+        } finally {
+            //2.还原...
+        }
+    }
+}
+```
+
+参考: [ThreadLocal父子线程传递实现方案](https://zhuanlan.zhihu.com/p/28501035)
