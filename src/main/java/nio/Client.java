@@ -7,7 +7,6 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
-import java.util.Arrays;
 
 /**
  * NIO Client.
@@ -23,13 +22,16 @@ public class Client {
     public void nioRead() throws IOException {
         SocketChannel channel = SocketChannel.open();
         channel.configureBlocking(true);
+
         channel.connect(new InetSocketAddress("192.168.80.128", 10010));
         while (channel.isConnectionPending()) {
             channel.finishConnect();
         }
+
         ByteBuffer buffer = ByteBuffer.allocate(10);
-        int readed = channel.read(buffer);
-        System.out.println(readed);
+        int read = channel.read(buffer);
+
+        System.out.println(read);
     }
 
     /**
