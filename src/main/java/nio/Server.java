@@ -1,5 +1,3 @@
-package nio;
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
@@ -23,12 +21,10 @@ public class Server {
         channel.socket().bind(new InetSocketAddress(8080));
         // none-blocking mode
         channel.configureBlocking(false);
+        // register accept event
         channel.register(selector, SelectionKey.OP_ACCEPT);
 
-        while (true) {
-            if (selector.select() == 0) {
-                continue;
-            }
+        while (selector.select() != 0) {
 
             Set<SelectionKey> keys = selector.selectedKeys();
             Iterator<SelectionKey> iterator = keys.iterator();
@@ -39,23 +35,16 @@ public class Server {
 
                 if (key.isAcceptable()) {
                     SocketChannel client = channel.accept();
-                    System.out.println("客户端连接: " + client.getRemoteAddress());
+                    System.out.println("Client connected: " + client.getRemoteAddress());
                     client.configureBlocking(false);
-                    client.register(selector, 0);
+                    client.register(selector, SelectionKey.OP_READ);
                 }
 
                 if (key.isWritable())
-                    System.out.println("可写");
+                    System.out.println("writable.");
 
                 if (key.isReadable())
-                    System.out.println("可读");
-
-                if (key.isConnectable())
-                    System.out.println("可连接");
-
-                if (key.isConnectable()) {
-                    System.out.println("可连接");
-                }
+                    System.out.println("readable");
 
                 iterator.remove();
             }
