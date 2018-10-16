@@ -303,3 +303,49 @@ public synchronized void print(PrintStream p) {
 # 响应解析
 
 其实就是获得输入流逐行解析的过程，不再向下展开。
+
+# DNS解析
+
+触发DNS解析的时机是HttpClient的New方法，默认的实现是Inet4AddressImpl的lookupAllHostAddr方法:
+
+```java
+public native InetAddress[]
+        lookupAllHostAddr(String hostname) throws UnknownHostException;
+```
+
+native实现其实调用的是Linux的**getaddrinfo系统**调用，当然JDK在java层面也有对解析结果的缓存。
+
+如何查看Linux的DNS服务器地址呢?
+
+- 配置文件
+
+  ```shell
+  cat /etc/resolv.conf
+  ```
+
+  结果如下:
+
+  ```html
+  nameserver 10.0.0.2
+  ```
+
+- nslookup:
+
+  ```shell
+  nslookup baidu.com
+  ```
+
+  结果:
+
+  ```html
+  Server:		10.0.0.2
+  Address:	10.0.0.2#53
+  
+  Non-authoritative answer:
+  Name:	baidu.com
+  Address: 220.181.57.216
+  Name:	baidu.com
+  Address: 123.125.115.110
+  ```
+
+  所以DNS便是10.0.0.2
