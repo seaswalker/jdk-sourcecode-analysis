@@ -254,5 +254,5 @@ public boolean containsValue(Object value) {
 }
 ```
 
-这是一个遍历所有bin + 链表/红黑树的过程，所以有过有根据value查找key的需求我们可以使用双向Map，比如Gauva的BiMap。
+这是一个遍历所有bin + 链表/红黑树的过程，所以有过有根据value查找key的需求我们可以使用双向Map，比如Guava的BiMap。
 
