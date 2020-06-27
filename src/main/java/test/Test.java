@@ -87,4 +87,23 @@ public class Test {
         System.out.println("被唤醒");
     }
 
+    private boolean flag = true;
+
+    @org.junit.Test
+    public void testVolatile() {
+        new Thread(() -> {
+            try {
+                System.out.println("子线程启动");
+                TimeUnit.SECONDS.sleep(3);
+                flag = false;
+                System.out.println("flag false");
+            } catch (InterruptedException ignore) {
+            }
+        }).start();
+
+        while (flag) {
+            System.out.print(1);
+        }
+    }
+
 }
