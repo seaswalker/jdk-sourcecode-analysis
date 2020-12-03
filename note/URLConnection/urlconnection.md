@@ -349,3 +349,148 @@ native实现其实调用的是Linux的**getaddrinfo系统**调用，当然JDK在
   ```
 
   所以DNS便是10.0.0.2
+  
+  # keep-alive
+
+在创建连接时，源码位于sun.net.www.http.New方法，省略版本:
+
+```java
+public static HttpClient New(URL url, Proxy p, int to, boolean useCache,
+        HttpURLConnection httpuc) throws IOException {
+    HttpClient ret = null;
+    /* see if one's already around */
+    if (useCache) {
+        ret = kac.get(url, null);
+    }
+    // ...
+}
+```
+
+kac是connection的缓存，定义在HttpClient类中:
+
+```java
+/* where we cache currently open, persistent connections */
+protected static KeepAliveCache kac = new KeepAliveCache();
+```
+
+KeepAliveCache的定义如下:
+
+```java
+/**
+ * A class that implements a cache of idle Http connections for keep-alive
+ *
+ * @author Stephen R. Pietrowicz (NCSA)
+ * @author Dave Brown
+ */
+public class KeepAliveCache
+    extends HashMap<KeepAliveKey, ClientVector>
+    implements Runnable {
+	
+    static final int MAX_CONNECTIONS = 5;
+    static int result = -1;
+    static int getMaxConnections() {
+        if (result == -1) {
+            result = AccessController.doPrivileged(
+                new GetIntegerAction("http.maxConnections", MAX_CONNECTIONS))
+                .intValue();
+            if (result <= 0) {
+                result = MAX_CONNECTIONS;
+            }
+        }
+        return result;
+    }
+    
+}
+```
+
+`getMaxConnections`指的是能够缓存的最大的连接数，如果不指定，默认是5. 那么缓存的链接的有效期是多少呢?
+
+在KeepAliveCache内有一个静态变量:
+
+```java
+static final int LIFETIME = 5000;
+```
+
+这个是**过期检查线程运行的时间间隔(毫秒)**。此线程初始化:
+
+```java
+AccessController.doPrivileged(new PrivilegedAction<>() {
+	public Void run() {
+		keepAliveTimer = InnocuousThread.newSystemThread("Keep-Alive-Timer", cache);
+		keepAliveTimer.setDaemon(true);
+		keepAliveTimer.setPriority(Thread.MAX_PRIORITY - 2);
+		keepAliveTimer.start();
+		return null;
+	}
+});
+```
+
+运行的核心逻辑:
+
+```java
+@Override
+public void run() {
+	do {
+		try {
+			Thread.sleep(LIFETIME);
+		} catch (InterruptedException e) {}
+
+		// Remove all outdated HttpClients.
+		synchronized (this) {
+			long currentTime = System.currentTimeMillis();
+			List<KeepAliveKey> keysToRemove = new ArrayList<>();
+
+			for (KeepAliveKey key : keySet()) {
+				ClientVector v = get(key);
+				synchronized (v) {
+					KeepAliveEntry e = v.peek();
+					while (e != null) {
+						if ((currentTime - e.idleStartTime) > v.nap) {
+							v.poll();
+							e.hc.closeServer();
+						} else {
+							break;
+						}
+						e = v.peek();
+					}
+
+					if (v.isEmpty()) {
+						keysToRemove.add(key);
+					}
+				}
+			}
+
+			for (KeepAliveKey key : keysToRemove) {
+				removeVector(key);
+			}
+		}
+	} while (!isEmpty());
+}
+```
+
+一个缓存的连接的有效期在KeepAliveCache.put时确定:
+
+```java
+/**
+ * Register this URL and HttpClient (that supports keep-alive) with the cache
+ * @param url  The URL contains info about the host and port
+ * @param http The HttpClient to be cached
+ */
+public synchronized void put(final URL url, Object obj, HttpClient http) {
+    if (v == null) {
+        int keepAliveTimeout = http.getKeepAliveTimeout();
+        v = new ClientVector(keepAliveTimeout > 0 ?
+                             keepAliveTimeout * 1000 : LIFETIME);
+        v.put(http);
+        super.put(key, v);
+    } else {
+        v.put(http);
+    }
+}
+```
+
+`http.getKeepAliveTimeout()`取的实际上是环境变量`http.keepAlive`的值。
+
+最后还有一个问题，连接是在什么时机被放进缓存的?
+
+在HttpURLConnection场景下是其`getInputStream`方法。
