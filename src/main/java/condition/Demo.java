@@ -13,7 +13,6 @@ public class Demo {
 		@Override
 		public void run() {
 			try {
-				Inter
 				lock.lock();
 				try {
 					System.out.println("开始等待");
